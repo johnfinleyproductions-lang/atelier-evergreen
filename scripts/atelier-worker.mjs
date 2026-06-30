@@ -22,7 +22,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { exec } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import postgresFactory from "postgres";
 
 // ---------------------------------------------------------------------------
@@ -34,6 +34,30 @@ const PROOF_CMD = process.env.ATELIER_PROOF_CMD ?? "next build";
 const PROOF_CWD = process.env.ATELIER_PROOF_CWD ?? process.cwd();
 const BUILD_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_BUFFER = 20 * 1024 * 1024;
+// OpenCode dispatch (the real "hands" — drives the local coder on M90t).
+const OPENCODE_HOST = process.env.ATELIER_OPENCODE_SSH_HOST ?? "think";
+const OPENCODE_MODEL = process.env.ATELIER_OPENCODE_MODEL ?? "vidbox/qwen3-coder-next-UD-Q2_K_XL";
+const OPENCODE_REPO = process.env.ATELIER_OPENCODE_REPO ?? "~/reskin-chunked";
+
+// Drive ONE scoped OpenCode chunk on M90t over SSH (PATH-fixed for the per-user
+// node install). Resolves {ok, exitCode, output, error}. Never throws.
+function dispatchOpenCodeChunk({ repoPath, model, prompt }) {
+  return new Promise((res) => {
+    const remote = [
+      'export PATH="$HOME/.local/node/current/bin:$PATH"',
+      'cd "$1" || exit 3',
+      'opencode run --model "$2" "$3"',
+    ].join(" && ");
+    const args = [OPENCODE_HOST, "bash", "-lc", remote, "--", "atelier-chunk", repoPath, model, prompt];
+    const child = spawn("ssh", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (err += d));
+    const t = setTimeout(() => { child.kill("SIGKILL"); res({ ok: false, error: "timeout" }); }, BUILD_TIMEOUT_MS);
+    child.on("close", (code) => { clearTimeout(t); res({ ok: code === 0, exitCode: code, output: out.slice(-1500), error: code !== 0 ? err.slice(-1500) : undefined }); });
+    child.on("error", (e) => { clearTimeout(t); res({ ok: false, error: e.message }); });
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Minimal .env.local loader (mirrors scripts/load-env.ts; no dependency).
@@ -104,8 +128,26 @@ async function runBuildProof(task) {
     };
   }
 
-  // TODO(week-2): replace the raw `next build` shell check with a scoped
-  // OpenCode build dispatch via lib/opencode-client.ts dispatchChunk().
+  // Real path: if the task carries a scoped chunk prompt, drive OpenCode on
+  // M90t to do the work FIRST (the chunked discipline proven this session) —
+  // then the build command below is the verifiable proof of that work.
+  const chunkPrompt = task?.spec?.chunkPrompt;
+  if (chunkPrompt) {
+    const d = await dispatchOpenCodeChunk({
+      repoPath: task.spec?.repoPath ?? OPENCODE_REPO,
+      model: task.spec?.model ?? OPENCODE_MODEL,
+      prompt: chunkPrompt,
+    });
+    if (!d.ok) {
+      return {
+        status: "fail",
+        score: 0,
+        threshold: 1,
+        detail: { stage: "opencode-dispatch", taskId: task.id, ...d },
+      };
+    }
+  }
+
   return await new Promise((resolveProof) => {
     exec(
       PROOF_CMD,

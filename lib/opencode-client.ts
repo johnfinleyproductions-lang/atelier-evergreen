@@ -197,6 +197,8 @@ async function dispatchViaSsh(input: {
   // then pass repoPath/prompt as positional args to a tiny inline runner so the
   // untrusted prompt never participates in shell parsing on the remote side.
   const remote = [
+    // opencode lives in the per-user node install, not the default login PATH.
+    'export PATH="$HOME/.local/node/current/bin:$PATH"',
     'cd "$1" || exit 3',
     'opencode run --model "$2" "$3"',
   ].join(' && ');
