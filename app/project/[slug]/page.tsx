@@ -4,6 +4,7 @@ import '../../dashboard.css';
 import { getProjectDashboard, listProjects, type FlowStage } from '@/lib/dashboard';
 import { DecisionCard } from './DecisionCard';
 import { WrenButton } from './WrenButton';
+import { HugoButton } from './HugoButton';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -155,6 +156,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
             </div>
 
             <WrenButton slug={slug} />
+            <HugoButton slug={slug} />
 
             {d.decision ? (
               <DecisionCard taskId={d.decision.taskId} question={d.decision.question} options={d.decision.options} />
