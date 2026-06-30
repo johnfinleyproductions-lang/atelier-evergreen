@@ -88,6 +88,9 @@ export default async function CleosFloor() {
         <a href="/wren" style={{ display: "inline-block", marginLeft: 14, marginBottom: 10, fontSize: 13, fontWeight: 700, color: "#7c5cff", textDecoration: "none" }}>
           ✍️ Talk to Wren
         </a>
+        <a href="/talk/cleo" style={{ display: "inline-block", marginLeft: 14, marginBottom: 10, fontSize: 13, fontWeight: 700, color: "#19c39a", textDecoration: "none" }}>
+          💬 Talk to your team
+        </a>
         <p style={{ margin: 0, fontSize: 15.5, color: INK_SOFT }}>
           <strong style={{ color: needsYou.length ? GOLD : INK_SOFT }}>
             {needsYou.length}
@@ -370,7 +373,8 @@ function Pill({ children }: { children: React.ReactNode }) {
 function EmployeeCard({ employee }: { employee: Employee }) {
   const dot = STATUS_COLORS[employee.status] ?? STATUS_COLORS.idle;
   return (
-    <div
+    <a
+      href={`/talk/${employee.slug}`}
       style={{
         background: CARD,
         border: `1px solid ${LINE}`,
@@ -379,6 +383,8 @@ function EmployeeCard({ employee }: { employee: Employee }) {
         display: "flex",
         flexDirection: "column",
         gap: 8,
+        textDecoration: "none",
+        color: "inherit",
       }}
     >
       <div
@@ -423,7 +429,8 @@ function EmployeeCard({ employee }: { employee: Employee }) {
           <span style={{ fontSize: 12, color: INK_SOFT }}>{employee.brainModel}</span>
         ) : null}
       </div>
-    </div>
+      <span style={{ fontSize: 11, color: TEAL, fontWeight: 600 }}>💬 Talk →</span>
+    </a>
   );
 }
 
