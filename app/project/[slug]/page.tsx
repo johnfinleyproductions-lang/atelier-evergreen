@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import '../../dashboard.css';
 import { getProjectDashboard, listProjects, type FlowStage } from '@/lib/dashboard';
 import { DecisionCard } from './DecisionCard';
+import { WrenButton } from './WrenButton';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -152,6 +153,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
                 {d.briefing.bullets.map((b, i) => <div className="bul" key={i}><span className="c">✓</span>{b}</div>)}
               </div>
             </div>
+
+            <WrenButton slug={slug} />
 
             {d.decision ? (
               <DecisionCard taskId={d.decision.taskId} question={d.decision.question} options={d.decision.options} />

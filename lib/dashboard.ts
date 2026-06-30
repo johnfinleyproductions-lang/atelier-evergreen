@@ -151,13 +151,17 @@ export async function getProjectDashboard(slug: string): Promise<ProjectDashboar
   });
 
   // ── Decision queue: a task kind='decision' with spec.options ──────────
-  // Show only UNRESOLVED decisions (not yet shipped); surface the made choice.
-  const decisionTasks = tasks.filter((t) => t.kind === 'decision');
+  // Show the MOST RECENT unresolved decision (so a freshly-generated one — e.g.
+  // Wren's headlines — surfaces); also surface the latest made choice.
+  const decisionTasks = tasks
+    .filter((t) => t.kind === 'decision')
+    .slice()
+    .reverse(); // tasks are created_at ASC; reverse → newest first
   let decision: ProjectDashboard['decision'] = null;
   let decidedAngle: string | null = null;
   for (const dt of decisionTasks) {
     const spec = (dt.spec ?? {}) as { question?: string; options?: DecisionOption[]; chosenLabel?: string };
-    if (dt.state === 'shipped' && spec.chosenLabel) { decidedAngle = spec.chosenLabel; continue; }
+    if (dt.state === 'shipped' && spec.chosenLabel) { if (!decidedAngle) decidedAngle = spec.chosenLabel; continue; }
     if (!decision && spec.question && Array.isArray(spec.options)) {
       decision = { taskId: dt.id as string, question: spec.question, options: spec.options };
     }
