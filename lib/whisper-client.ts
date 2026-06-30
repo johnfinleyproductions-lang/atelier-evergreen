@@ -1,14 +1,14 @@
 // lib/whisper-client.ts
 //
-// Atelier voice I/O. transcribe() posts audio to the Whisper STT service on
-// vidbox (faster-whisper, GPU); speak() posts text to VoxStation TTS. Both are
+// Atelier voice I/O. transcribe() posts audio to the Whisper STT service on M90t
+// (faster-whisper large-v3, GPU); speak() posts text to VoxStation TTS. Both are
 // LAN/tailnet services reached server-side from API routes. Graceful errors —
 // never throw; return a typed result the caller can branch on.
 
-const STT_URL = process.env.ATELIER_STT_URL ?? 'http://192.168.4.196:8025/stt';
+const STT_URL = process.env.ATELIER_STT_URL ?? 'http://192.168.4.200:8025/stt';
 // VoxStation TTS — exact synth path is host-specific; override via env.
 // TODO(voice): confirm the VoxStation synth endpoint path on :8020.
-const TTS_URL = process.env.ATELIER_TTS_URL ?? 'http://192.168.4.196:8020/api/tts';
+const TTS_URL = process.env.ATELIER_TTS_URL ?? 'http://192.168.4.200:8020/api/tts';
 
 export interface TranscriptWord {
   word: string;
