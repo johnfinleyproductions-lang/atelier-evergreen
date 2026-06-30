@@ -14,7 +14,7 @@ import { extractPalette, type PaletteSwatch } from './palette';
 import { resolveSpec, type ResolvedSpec } from './merge-ledger';
 import { getStyleCard, getDefaultBrandRubric } from './style-repo';
 
-const PALETTE_DELTAE_THRESHOLD = 22; // CIE76 — below this two colors are "the same brand color"
+const PALETTE_DELTAE_THRESHOLD = 35; // CIE76 — below this two colors are "the same brand color"
 
 export interface RenderAndScoreInput {
   html?: string;
