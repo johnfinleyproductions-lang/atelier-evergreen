@@ -13,8 +13,15 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
+import { OLLAMA_URL } from './ollama';
 
 const pexecFile = promisify(execFile);
+
+// Approx VRAM each Atelier model needs to load (MB). Used by the room check.
+export const MODEL_VRAM_MB: Record<string, number> = {
+  'qwen3.5:9b': 7000,
+  'qwen2.5-coder:14b': 9000,
+};
 
 export interface LaneCfg {
   id: string; name: string; lan: string; gpu: string; vramTotalMB: number;
@@ -167,6 +174,59 @@ export async function routeModel(opts: { kind: WorkKind; model?: string; sizeMB?
   const pick = onDemand[0] ?? byId('framerstation');
   return { laneId: pick?.id ?? null, laneName: pick?.name ?? null, warm: false, zone: zone.id, blockedByZone: false,
     reason: pick ? `No warm copy; ${pick.name} has the most free VRAM on an on-demand lane.` : 'No on-demand lane reachable.' };
+}
+
+// ── Eviction: "kick what's not being used" ───────────────────────────────────
+const AUTOKICK = (process.env.ATELIER_LANE_AUTOKICK ?? 'on') !== 'off';
+
+/** Unload a specific model on an Ollama lane (keep_alive:0 → immediate evict). */
+export async function kickModel(ollamaUrl: string, model: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${ollamaUrl}/api/generate`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model, keep_alive: 0 }),
+      signal: AbortSignal.timeout(8000),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+/** Kick every loaded model on a lane except the ones to keep. Returns what was evicted. */
+export async function kickIdle(laneId: string, keep: string[] = []): Promise<{ kicked: string[]; note: string }> {
+  const lane = loadLanesConfig().lanes.find((l) => l.id === laneId);
+  if (!lane?.ollama) return { kicked: [], note: `${laneId}: no Ollama lane to kick` };
+  const warm = (await ollamaPs(lane.ollama)) ?? [];
+  const kicked: string[] = [];
+  for (const m of warm) {
+    if (keep.includes(m.name)) continue;
+    if (await kickModel(lane.ollama, m.name)) kicked.push(m.name);
+  }
+  return { kicked, note: kicked.length ? `kicked ${kicked.join(', ')} on ${lane.name}` : `${lane.name}: nothing idle to kick` };
+}
+
+function laneIdForOllama(url: string): string | null {
+  return loadLanesConfig().lanes.find((l) => l.ollama && url.startsWith(l.ollama.replace(/\/$/, '')))?.id
+    ?? loadLanesConfig().lanes.find((l) => l.ollama === url)?.id ?? null;
+}
+
+/**
+ * Ensure Atelier's on-demand lane has room for `model` before a heavy job runs:
+ * if free VRAM is short, kick whatever idle models are parked there (except the
+ * one we're about to use). No-op if there's already room or autokick is off.
+ * This is the "use Framerstation/vidbox + kick what's not being used" policy.
+ */
+export async function ensureAtelierLaneRoom(model: string): Promise<{ ok: boolean; kicked: string[]; note: string }> {
+  if (!AUTOKICK) return { ok: true, kicked: [], note: 'autokick off' };
+  const laneId = laneIdForOllama(OLLAMA_URL);
+  if (!laneId) return { ok: true, kicked: [], note: 'unknown lane' };
+  const needMB = MODEL_VRAM_MB[model] ?? 7000;
+  const state = (await getLanesState()).find((s) => s.id === laneId);
+  if (!state) return { ok: true, kicked: [], note: 'lane unreachable' };
+  // Already room (or already warm)? Don't disturb the lane.
+  if (state.warmModels.some((m) => m.name === model)) return { ok: true, kicked: [], note: `${model} already warm` };
+  if (state.vramFreeMB != null && state.vramFreeMB >= needMB) return { ok: true, kicked: [], note: 'room available' };
+  const r = await kickIdle(laneId, [model]);
+  return { ok: true, kicked: r.kicked, note: r.note };
 }
 
 /** A glanceable lane map for chat / status. */

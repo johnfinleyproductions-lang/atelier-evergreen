@@ -108,6 +108,15 @@ const RUNNERS: Record<string, (input: Record<string, unknown>) => Promise<unknow
   remy_script: async (input) => scriptAndLog((input.brief as string) || ''),
 };
 
+// Which model each job kind loads — so we can free the lane for it first.
+const JOB_MODEL: Record<string, string> = {
+  hugo_build: process.env.ATELIER_HUGO_MODEL ?? 'qwen2.5-coder:14b',
+  vera_research: 'qwen3.5:9b',
+  marlowe_review: 'qwen3.5:9b',
+  lena_plan: 'qwen3.5:9b',
+  remy_script: 'qwen3.5:9b',
+};
+
 /** Run a claimed job to completion. Safe to fire-and-forget; never throws. */
 export async function processJob(id: string): Promise<void> {
   try {
@@ -120,6 +129,14 @@ export async function processJob(id: string): Promise<void> {
       return;
     }
     try {
+      // Free the on-demand lane for this job's model first (kick idle models).
+      const model = JOB_MODEL[job.kind];
+      if (model) {
+        try {
+          const { ensureAtelierLaneRoom } = await import('./lanes');
+          await ensureAtelierLaneRoom(model);
+        } catch { /* lane prep is best-effort */ }
+      }
       const result = await runner(job.input);
       await finishOk(id, result);
     } catch (err) {

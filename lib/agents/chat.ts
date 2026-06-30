@@ -13,7 +13,7 @@ import { enqueueHugoBuild } from '../jobs';
 import { getStyleCard, getDefaultBrandRubric } from '../style-repo';
 import { resolveSpec } from '../merge-ledger';
 import { systemHealth, formatHealth } from './otto';
-import { getLanesState, currentZone, formatLanes } from '../lanes';
+import { getLanesState, currentZone, formatLanes, kickIdle } from '../lanes';
 import { enqueueVeraResearch, enqueueMarloweReview, enqueueLenaPlan, enqueueRemyScript } from '../jobs';
 import { recall, formatRecall } from './dewey';
 import { critique, formatCritique } from './marlowe';
@@ -57,6 +57,15 @@ async function runTool(slug: string, message: string): Promise<string | null> {
       dos ? `• Do: ${dos}` : '',
       `Want Hugo to build it? Say "hugo: build ${m.replace(/^(design|style|lay\s?out|mock|theme)\b/i, '').trim()}".`,
     ].filter(Boolean).join('\n');
+  }
+
+  // Otto: "kick / free / evict <lane>" → unload idle models to free VRAM.
+  if (slug === 'otto' && /\b(kick|free|evict|unload|clear)\b/i.test(m) && /(lane|gpu|vram|framer|vidbox|m90t|think|model)/i.test(m)) {
+    const laneId = /framer/i.test(m) ? 'framerstation' : /vidbox/i.test(m) ? 'vidbox' : /m90t|think|lynn/i.test(m) ? 'm90t' : 'framerstation';
+    const r = await kickIdle(laneId);
+    await new Promise((res) => setTimeout(res, 1200)); // let Ollama settle the unload before re-reading
+    const [lanes, zone] = [await getLanesState(), currentZone()];
+    return `${r.note}.\n\n${formatLanes(lanes, zone)}`;
   }
 
   // Otto: "lanes / gpu / vram ..." → the live GPU lane map + active zone.
