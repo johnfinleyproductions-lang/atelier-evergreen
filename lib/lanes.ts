@@ -30,7 +30,7 @@ export interface LaneCfg {
 export interface ZoneCfg { id: string; days?: string[]; start?: string; end?: string; block?: string[]; allow?: string[]; note?: string }
 export interface LanesConfig { lanes: LaneCfg[]; zones: ZoneCfg[]; defaultZone: { id: string; note?: string } }
 
-export interface WarmModel { name: string; vramMB: number }
+export interface WarmModel { name: string; vramMB: number; expiresMs?: number | null }
 export interface LaneState {
   id: string; name: string; role: 'pinned' | 'on-demand'; lan: string; gpu: string;
   reachable: boolean; source: 'nvidia-smi' | 'ollama-ps' | 'unknown';
@@ -58,12 +58,23 @@ async function nvidiaUsedTotal(): Promise<{ usedMB: number; totalMB: number } | 
   } catch { return null; }
 }
 
+// Ollama emits nanosecond-precision timestamps (…569742199-05:00). Date.parse
+// chokes on >3 fractional digits, so truncate to milliseconds first.
+function parseExpires(s?: string): number | null {
+  if (!s) return null;
+  const t = Date.parse(s.replace(/(\.\d{3})\d+/, '$1'));
+  return Number.isNaN(t) ? null : t;
+}
+
 async function ollamaPs(url: string): Promise<WarmModel[] | null> {
   try {
     const res = await fetch(`${url}/api/ps`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
-    const j = (await res.json()) as { models?: { name: string; size_vram?: number }[] };
-    return (j.models ?? []).map((m) => ({ name: m.name, vramMB: Math.round((m.size_vram ?? 0) / 1e6) }));
+    const j = (await res.json()) as { models?: { name: string; size_vram?: number; expires_at?: string }[] };
+    return (j.models ?? []).map((m) => ({
+      name: m.name, vramMB: Math.round((m.size_vram ?? 0) / 1e6),
+      expiresMs: parseExpires(m.expires_at),
+    }));
   } catch { return null; }
 }
 
@@ -228,17 +239,58 @@ export async function kickModel(ollamaUrl: string, model: string): Promise<boole
   } catch { return false; }
 }
 
-/** Kick every loaded model on a lane except the ones to keep. Returns what was evicted. */
-export async function kickIdle(laneId: string, keep: string[] = []): Promise<{ kicked: string[]; note: string }> {
+const INUSE_SETTLE_MS = Number(process.env.ATELIER_INUSE_SETTLE_MS ?? '2500');
+
+/**
+ * Which models on a lane are ACTIVELY in use right now. Ollama refreshes a
+ * model's expires_at (= last access + keep_alive) on every request, so if it
+ * advances across two snapshots a couple seconds apart, the model was hit during
+ * that window — i.e. someone (e.g. OpenCode) is actively using it. Idle models'
+ * expires_at just counts down (unchanged). Conservative: on any read failure we
+ * return everything-as-in-use so we never kick blindly.
+ */
+export async function detectInUse(ollamaUrl: string, settleMs = INUSE_SETTLE_MS): Promise<Set<string>> {
+  const s1 = await ollamaPs(ollamaUrl);
+  if (!s1) return new Set();
+  if (!s1.length) return new Set();
+  await new Promise((r) => setTimeout(r, settleMs));
+  const s2 = await ollamaPs(ollamaUrl);
+  if (!s2) return new Set(s1.map((m) => m.name)); // can't confirm idle → treat all as in use
+  const e1 = new Map(s1.map((m) => [m.name, m.expiresMs ?? null]));
+  const inUse = new Set<string>();
+  for (const m of s2) {
+    const before = e1.get(m.name);
+    const after = m.expiresMs ?? null;
+    // expires_at advanced → accessed during the window → actively in use.
+    if (before != null && after != null && after > before + 500) inUse.add(m.name);
+  }
+  return inUse;
+}
+
+/**
+ * Kick loaded models on a lane except the ones to keep. By default it also
+ * PROTECTS models that are actively in use (respectInUse) — so it never evicts
+ * a model OpenCode is mid-request on. Set respectInUse=false to force-clear.
+ */
+export async function kickIdle(
+  laneId: string, keep: string[] = [], respectInUse = true,
+): Promise<{ kicked: string[]; spared: string[]; note: string }> {
   const lane = loadLanesConfig().lanes.find((l) => l.id === laneId);
-  if (!lane?.ollama) return { kicked: [], note: `${laneId}: no Ollama lane to kick` };
+  if (!lane?.ollama) return { kicked: [], spared: [], note: `${laneId}: no Ollama lane to kick` };
   const warm = (await ollamaPs(lane.ollama)) ?? [];
-  const kicked: string[] = [];
-  for (const m of warm) {
-    if (keep.includes(m.name)) continue;
+  const candidates = warm.filter((m) => !keep.includes(m.name));
+  if (!candidates.length) return { kicked: [], spared: [], note: `${lane.name}: nothing idle to kick` };
+  const inUse = respectInUse ? await detectInUse(lane.ollama) : new Set<string>();
+  const kicked: string[] = []; const spared: string[] = [];
+  for (const m of candidates) {
+    if (inUse.has(m.name)) { spared.push(m.name); continue; }
     if (await kickModel(lane.ollama, m.name)) kicked.push(m.name);
   }
-  return { kicked, note: kicked.length ? `kicked ${kicked.join(', ')} on ${lane.name}` : `${lane.name}: nothing idle to kick` };
+  const note = [
+    kicked.length ? `kicked ${kicked.join(', ')}` : 'nothing idle to kick',
+    spared.length ? `spared ${spared.join(', ')} (in use)` : '',
+  ].filter(Boolean).join('; ') + ` on ${lane.name}`;
+  return { kicked, spared, note };
 }
 
 function laneIdForOllama(url: string): string | null {

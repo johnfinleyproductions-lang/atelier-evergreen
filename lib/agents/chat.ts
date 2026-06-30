@@ -62,7 +62,8 @@ async function runTool(slug: string, message: string): Promise<string | null> {
   // Otto: "kick / free / evict <lane>" → unload idle models to free VRAM.
   if (slug === 'otto' && /\b(kick|free|evict|unload|clear)\b/i.test(m) && /(lane|gpu|vram|framer|vidbox|m90t|think|model)/i.test(m)) {
     const laneId = /framer/i.test(m) ? 'framerstation' : /vidbox/i.test(m) ? 'vidbox' : /m90t|think|lynn/i.test(m) ? 'm90t' : 'framerstation';
-    const r = await kickIdle(laneId);
+    const force = /\b(force|hard|anyway|all)\b/i.test(m); // override in-use protection
+    const r = await kickIdle(laneId, [], !force);
     await new Promise((res) => setTimeout(res, 1200)); // let Ollama settle the unload before re-reading
     const [lanes, zone] = [await getLanesState(), currentZone()];
     return `${r.note}.\n\n${formatLanes(lanes, zone)}`;
