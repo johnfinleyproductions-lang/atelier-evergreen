@@ -85,6 +85,9 @@ export default async function CleosFloor() {
         <a href="/project/launch-course-19" style={{ display: "inline-block", marginBottom: 10, fontSize: 13, fontWeight: 700, color: TEAL, textDecoration: "none" }}>
           → Open the Project Command Center
         </a>
+        <a href="/wren" style={{ display: "inline-block", marginLeft: 14, marginBottom: 10, fontSize: 13, fontWeight: 700, color: "#7c5cff", textDecoration: "none" }}>
+          ✍️ Talk to Wren
+        </a>
         <p style={{ margin: 0, fontSize: 15.5, color: INK_SOFT }}>
           <strong style={{ color: needsYou.length ? GOLD : INK_SOFT }}>
             {needsYou.length}
