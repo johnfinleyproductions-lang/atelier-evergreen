@@ -12,6 +12,7 @@ import { generateHeadlines } from './wren';
 import { enqueueHugoBuild } from '../jobs';
 import { getStyleCard, getDefaultBrandRubric } from '../style-repo';
 import { resolveSpec } from '../merge-ledger';
+import { systemHealth, formatHealth } from './otto';
 
 const PUBLIC_URL = process.env.ATELIER_PUBLIC_URL ?? 'http://192.168.4.200:3040';
 
@@ -52,6 +53,12 @@ async function runTool(slug: string, message: string): Promise<string | null> {
       dos ? `• Do: ${dos}` : '',
       `Want Hugo to build it? Say "hugo: build ${m.replace(/^(design|style|lay\s?out|mock|theme)\b/i, '').trim()}".`,
     ].filter(Boolean).join('\n');
+  }
+
+  // Otto: "health / status / are we green / services ..." → a real live snapshot.
+  if (slug === 'otto' && /\b(health|status|healthy|green|services?|substrate|how are we|everything (ok|up)|systems?)\b/i.test(m)) {
+    const h = await systemHealth();
+    return formatHealth(h);
   }
 
   return null;
