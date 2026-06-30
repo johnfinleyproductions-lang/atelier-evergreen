@@ -109,3 +109,23 @@ export async function graduateRule(threshold = 3): Promise<GraduatedRule[]> {
       suggestedRule: `Tyler has rejected "${r.pattern}" ${r.n}x — promote to a hard brand rule.`,
     }));
 }
+
+/**
+ * Recall recent taste signals and format them as a prompt snippet an agent can
+ * use to bias generation toward what Tyler picks and away from what he rejects.
+ * Returns '' when there's no history yet (cold start).
+ */
+export async function recallTasteForPrompt(subjectKind: string, limit = 12): Promise<string> {
+  const rows = (await sql`
+    select signal, note from atelier_taste_memory
+     where workspace_id = ${ATELIER_WS} and subject_kind = ${subjectKind} and note is not null
+     order by created_at desc limit ${limit}
+  `) as unknown as { signal: string; note: string }[];
+  if (!rows.length) return '';
+  const liked = rows.filter((r) => r.signal === 'approved' || r.signal === 'loved').map((r) => r.note);
+  const avoided = rows.filter((r) => r.signal === 'rejected' || r.signal === 'edited').map((r) => r.note);
+  const parts: string[] = [];
+  if (liked.length) parts.push(`Tyler has PICKED these before (match this voice): ${liked.slice(0, 6).map((l) => `"${l}"`).join('; ')}.`);
+  if (avoided.length) parts.push(`He has REJECTED these (avoid this voice): ${avoided.slice(0, 8).map((l) => `"${l}"`).join('; ')}.`);
+  return parts.length ? `\n\nLEARNED TASTE — ${parts.join(' ')} Lean toward what he picks.` : '';
+}

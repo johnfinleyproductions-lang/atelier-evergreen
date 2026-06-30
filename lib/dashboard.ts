@@ -8,6 +8,7 @@
 
 import { sql } from './db';
 import { ATELIER_WS } from './atelier';
+import { recordTasteSignal } from './taste-memory';
 
 type Row = Record<string, unknown>;
 
@@ -257,5 +258,23 @@ export async function resolveDecision(
     values (${ATELIER_WS}, ${dossierId}, ${taskId}, ${'cleo'}, ${'decision'},
             ${`Decided: ${chosenLabel}`}, ${sql.json({ optionKey, chosenLabel } as never)})
   `;
+
+  // ── Taste signal: the pick IS the signal. Favor the chosen, veto the rest. ──
+  // This is what makes Wren learn Tyler's voice over time (recalled on her next
+  // generation). subject_kind carries the producing agent so taste is scoped.
+  const fullSpec = (rows[0].spec ?? {}) as { options?: DecisionOption[]; agent?: string };
+  const subjectKind = fullSpec.agent ? `${fullSpec.agent}_option` : 'decision_option';
+  await recordTasteSignal({
+    subjectKind, subjectRef: { label: chosenLabel, optionKey, agent: fullSpec.agent ?? null },
+    signal: 'approved', kind: 'taste', weight: 1, note: chosenLabel,
+  });
+  for (const o of fullSpec.options ?? []) {
+    if (o.key === optionKey) continue;
+    await recordTasteSignal({
+      subjectKind, subjectRef: { label: o.label, optionKey: o.key, agent: fullSpec.agent ?? null },
+      signal: 'rejected', kind: 'veto', weight: 1, note: o.label,
+    });
+  }
+
   return { ok: true, chosenLabel };
 }

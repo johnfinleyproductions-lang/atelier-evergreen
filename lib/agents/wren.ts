@@ -48,7 +48,7 @@ function parseHeadlines(raw: string, want: number): string[] {
 }
 
 /** Generate N headline options for a brief. Real model call; never throws. */
-export async function generateHeadlines(brief: string, count = 6): Promise<WrenResult> {
+export async function generateHeadlines(brief: string, count = 6, tasteContext = ''): Promise<WrenResult> {
   const t0 = Date.now();
   try {
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
@@ -59,7 +59,7 @@ export async function generateHeadlines(brief: string, count = 6): Promise<WrenR
         stream: false,
         options: { temperature: 0.8 },
         messages: [
-          { role: 'system', content: SYSTEM },
+          { role: 'system', content: SYSTEM + tasteContext },
           { role: 'user', content: `Brief: ${brief}\n\nWrite ${count} headline options. JSON array of strings only.` },
         ],
       }),
@@ -90,6 +90,7 @@ export async function generateHeadlines(brief: string, count = 6): Promise<WrenR
 // ── Wren in the flow: generate headlines → a Decision + an activity entry ──
 import { sql } from '../db';
 import { ATELIER_WS } from '../atelier';
+import { recallTasteForPrompt } from '../taste-memory';
 
 export interface WrenRunResult {
   ok: boolean;
@@ -113,7 +114,9 @@ export async function wrenWriteHeadlines(slug: string): Promise<WrenRunResult> {
   const did = dRows[0].id as string;
   const brief = `${dRows[0].title}${dRows[0].objective ? ' — ' + dRows[0].objective : ''}`;
 
-  const gen = await generateHeadlines(brief, 6);
+  // Recall Tyler's taste from past picks so Wren leans toward his voice.
+  const taste = await recallTasteForPrompt('wren_option');
+  const gen = await generateHeadlines(brief, 6, taste);
   if (!gen.ok) return { ok: false, headlines: [], decisionTaskId: null, latencyMs: gen.latencyMs, error: gen.error };
 
   // Clear any prior open Wren headline decision for this project.
@@ -134,7 +137,7 @@ export async function wrenWriteHeadlines(slug: string): Promise<WrenRunResult> {
   await sql`
     insert into atelier_dossier_entry (workspace_id, dossier_id, task_id, employee_slug, entry_type, body, payload)
     values (${ATELIER_WS}, ${did}, ${tRows[0].id as string}, 'wren', 'asset',
-            ${`Generated ${gen.headlines.length} headline options (${gen.model})`},
+            ${`Generated ${gen.headlines.length} headline options (${gen.model})${taste ? " · used your learned taste" : ""}`},
             ${sql.json({ agent: 'wren', latencyMs: gen.latencyMs } as never)})
   `;
 
