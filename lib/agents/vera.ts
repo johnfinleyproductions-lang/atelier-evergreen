@@ -13,6 +13,7 @@
 import { sql } from '../db';
 import { ATELIER_WS } from '../atelier';
 
+import { OLLAMA_KEEPALIVE } from '../ollama';
 const OLLAMA_URL = process.env.ATELIER_OLLAMA_URL ?? 'http://192.168.4.176:11434';
 const VERA_MODEL = process.env.ATELIER_VERA_MODEL ?? 'qwen3.5:9b';
 const KNOWLEDGE_URL = process.env.ATELIER_KNOWLEDGE_URL ?? 'http://127.0.0.1:8001';
@@ -114,11 +115,11 @@ export async function research(brief: string): Promise<ResearchPlan> {
 
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      // keep_alive pins the model so back-to-back Atelier calls don't pay a cold
-      // reload (Framerstation's GPU is shared with OpenCode's 27b). The long
-      // timeout tolerates a one-off cold load; research runs as a background job,
-      // so this never blocks an HTTP request.
-      body: JSON.stringify({ model: VERA_MODEL, stream: false, keep_alive: '10m', options: { temperature: 0.6 },
+      // keep_alive is env-driven (lib/ollama.ts): modest on Framerstation's shared
+      // on-demand lane, long on M90t's pinned lane. The long timeout tolerates a
+      // one-off cold load; research runs as a background job, so it never blocks a
+      // request even when OpenCode's 27b just evicted the model.
+      body: JSON.stringify({ model: VERA_MODEL, stream: false, keep_alive: OLLAMA_KEEPALIVE, options: { temperature: 0.6 },
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
       signal: AbortSignal.timeout(140_000),
     });

@@ -8,6 +8,7 @@
 
 import { projectContext, logToProject } from './context';
 
+import { OLLAMA_KEEPALIVE } from '../ollama';
 const OLLAMA_URL = process.env.ATELIER_OLLAMA_URL ?? 'http://192.168.4.176:11434';
 const REMY_MODEL = process.env.ATELIER_REMY_MODEL ?? 'qwen3.5:9b';
 
@@ -53,7 +54,7 @@ export async function videoScript(brief: string): Promise<VideoScript> {
     const user = `Brief: ${brief}\n\n${ctx}\n\nReturn the JSON object.`;
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: REMY_MODEL, stream: false, keep_alive: '10m', options: { temperature: 0.7 },
+      body: JSON.stringify({ model: REMY_MODEL, stream: false, keep_alive: OLLAMA_KEEPALIVE, options: { temperature: 0.7 },
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
       signal: AbortSignal.timeout(140_000),
     });

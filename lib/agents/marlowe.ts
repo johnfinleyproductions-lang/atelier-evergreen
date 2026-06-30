@@ -14,6 +14,7 @@ import { sql } from '../db';
 import { ATELIER_WS } from '../atelier';
 import { recallTasteForPrompt } from '../taste-memory';
 
+import { OLLAMA_KEEPALIVE } from '../ollama';
 const OLLAMA_URL = process.env.ATELIER_OLLAMA_URL ?? 'http://192.168.4.176:11434';
 const MARLOWE_MODEL = process.env.ATELIER_MARLOWE_MODEL ?? 'qwen3.5:9b';
 
@@ -75,7 +76,7 @@ export async function critique(content: string, label = 'this copy'): Promise<Cr
     const user = `Critique ${label}:\n\n${content}\n\nReturn the JSON object only.`;
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: MARLOWE_MODEL, stream: false, keep_alive: '10m',
+      body: JSON.stringify({ model: MARLOWE_MODEL, stream: false, keep_alive: OLLAMA_KEEPALIVE,
         options: { temperature: 0.4 },
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
       signal: AbortSignal.timeout(110_000),
