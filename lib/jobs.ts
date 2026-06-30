@@ -20,19 +20,22 @@ import { reviewLatestWren } from './agents/marlowe';
 import { planAndLog } from './agents/lena';
 import { scriptAndLog } from './agents/remy';
 
-export type JobStatus = 'queued' | 'running' | 'done' | 'error';
+export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'deferred';
+export type WorkKind = 'interactive' | 'batch-heavy';
 
 export interface Job {
   id: string;
   kind: string;
   agentSlug: string | null;
   status: JobStatus;
+  workKind: WorkKind;
   input: Record<string, unknown>;
   result: Record<string, unknown> | null;
   error: string | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  runAfter: string | null;
 }
 
 function mapRow(r: Record<string, unknown>): Job {
@@ -41,12 +44,14 @@ function mapRow(r: Record<string, unknown>): Job {
     kind: r.kind as string,
     agentSlug: (r.agent_slug as string | null) ?? null,
     status: r.status as JobStatus,
+    workKind: ((r.work_kind as string) ?? 'interactive') as WorkKind,
     input: (r.input as Record<string, unknown>) ?? {},
     result: (r.result as Record<string, unknown> | null) ?? null,
     error: (r.error as string | null) ?? null,
     createdAt: String(r.created_at),
     startedAt: r.started_at ? String(r.started_at) : null,
     finishedAt: r.finished_at ? String(r.finished_at) : null,
+    runAfter: r.run_after ? String(r.run_after) : null,
   };
 }
 
@@ -147,20 +152,64 @@ export async function processJob(id: string): Promise<void> {
   }
 }
 
-/** Enqueue a job and start it in the background. Returns the job id immediately. */
+/**
+ * Enqueue a job and start it in the background. If it's batch-heavy and the
+ * active zone blocks that work, it's parked as 'deferred' with run_after set to
+ * when the block lifts (the ticker runs it then) instead of firing now.
+ */
 export async function enqueueJob(
   kind: string,
   input: Record<string, unknown>,
   agentSlug: string | null = null,
+  workKind: WorkKind = 'interactive',
 ): Promise<string> {
+  // Zone gate (batch-heavy only). Import lazily to avoid a cycle.
+  let deferUntil: Date | null = null;
+  if (workKind === 'batch-heavy') {
+    try {
+      const { zoneBlocks, nextAllowedAt } = await import('./lanes');
+      if (zoneBlocks('batch-heavy')) {
+        // nextAllowedAt is null only for a pinned/forced block → fall back to +30m.
+        deferUntil = nextAllowedAt('batch-heavy') ?? new Date(Date.now() + 30 * 60_000);
+      }
+    } catch { /* if the lane manager is unavailable, just run it */ }
+  }
+
+  const status = deferUntil ? 'deferred' : 'queued';
   const rows = (await sql`
-    insert into atelier_job (workspace_id, kind, agent_slug, status, input)
-    values (${ATELIER_WS}, ${kind}, ${agentSlug}, 'queued', ${sql.json(input as never)})
+    insert into atelier_job (workspace_id, kind, agent_slug, status, work_kind, input, run_after)
+    values (${ATELIER_WS}, ${kind}, ${agentSlug}, ${status}, ${workKind}, ${sql.json(input as never)}, ${deferUntil ?? null})
     returning id
   `) as unknown as Record<string, unknown>[];
   const id = rows[0].id as string;
-  void processJob(id); // fire-and-forget on the persistent server
+  if (!deferUntil) void processJob(id); // fire now; deferred jobs wait for the ticker
   return id;
+}
+
+/**
+ * Run any deferred jobs that are now due (run_after passed) and whose zone no
+ * longer blocks them. Promotes them to 'queued' and fires them. Called by the
+ * in-process ticker (instrumentation.ts) and exposed for a manual/cron trigger.
+ */
+export async function runDueDeferredJobs(): Promise<{ started: string[]; stillDeferred: number }> {
+  const due = (await sql`
+    select id, work_kind from atelier_job
+     where workspace_id = ${ATELIER_WS} and status = 'deferred' and run_after <= now()
+     order by run_after asc limit 20
+  `) as unknown as { id: string; work_kind: string }[];
+  const started: string[] = [];
+  const { zoneBlocks } = await import('./lanes');
+  for (const j of due) {
+    if (zoneBlocks((j.work_kind as WorkKind) ?? 'batch-heavy')) continue; // zone still blocks → leave deferred
+    const won = (await sql`
+      update atelier_job set status = 'queued' where id = ${j.id} and status = 'deferred' returning id
+    `) as unknown as Record<string, unknown>[];
+    if (won.length) { started.push(j.id); void processJob(j.id); }
+  }
+  const rest = (await sql`
+    select count(*)::int as n from atelier_job where workspace_id = ${ATELIER_WS} and status = 'deferred'
+  `) as unknown as { n: number }[];
+  return { started, stillDeferred: rest[0]?.n ?? 0 };
 }
 
 export async function enqueueHugoBuild(slug: string, brief: string): Promise<string> {

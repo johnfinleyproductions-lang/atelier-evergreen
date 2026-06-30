@@ -68,10 +68,17 @@ async function runTool(slug: string, message: string): Promise<string | null> {
     return `${r.note}.\n\n${formatLanes(lanes, zone)}`;
   }
 
-  // Otto: "lanes / gpu / vram ..." → the live GPU lane map + active zone.
-  if (slug === 'otto' && /\b(lanes?|gpu|gpus|vram|model lane|scheduler|zone)\b/i.test(m)) {
+  // Otto: "lanes / gpu / vram ..." → the live GPU lane map + active zone + deferred jobs.
+  if (slug === 'otto' && /\b(lanes?|gpu|gpus|vram|model lane|scheduler|zone|deferred|queue)\b/i.test(m)) {
     const [lanes, zone] = [await getLanesState(), currentZone()];
-    return formatLanes(lanes, zone);
+    const { listRecentJobs } = await import('../jobs');
+    const deferred = (await listRecentJobs(40)).filter((j) => j.status === 'deferred');
+    let out = formatLanes(lanes, zone);
+    if (deferred.length) {
+      out += `\n\nDeferred batch work (waiting for its window):\n` +
+        deferred.map((j) => `  ⏸ ${j.kind} → runs after ${j.runAfter ? new Date(j.runAfter).toLocaleString() : '?'}`).join('\n');
+    }
+    return out;
   }
 
   // Otto: "health / status / are we green / services ..." → a real live snapshot.

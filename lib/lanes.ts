@@ -108,6 +108,12 @@ export interface ActiveZone { id: string; block: string[]; allow: string[]; note
 /** Which zone is active now (server local time). Pass minutes-since-midnight + day index to override. */
 export function currentZone(nowMin?: number, dayIdx?: number): ActiveZone {
   const cfg = loadLanesConfig();
+  // Manual override: ATELIER_FORCE_ZONE=<zone id> pins a zone (e.g. force "work-hours"
+  // to protect the lane). Only honored when not explicitly probing a time.
+  if (nowMin == null && dayIdx == null && process.env.ATELIER_FORCE_ZONE) {
+    const forced = cfg.zones.find((z) => z.id === process.env.ATELIER_FORCE_ZONE);
+    if (forced) return { id: forced.id, block: forced.block ?? [], allow: forced.allow ?? [], note: `(forced) ${forced.note ?? ''}` };
+  }
   const d = new Date();
   const mins = nowMin ?? d.getHours() * 60 + d.getMinutes();
   const day = DAY[dayIdx ?? d.getDay()];
@@ -119,6 +125,37 @@ export function currentZone(nowMin?: number, dayIdx?: number): ActiveZone {
     if (inRange) return { id: z.id, block: z.block ?? [], allow: z.allow ?? [], note: z.note };
   }
   return { id: cfg.defaultZone.id, block: [], allow: [], note: cfg.defaultZone.note };
+}
+
+/** True when the active zone blocks this work kind. */
+export function zoneBlocks(workKind: WorkKind, zone?: ActiveZone): boolean {
+  const z = zone ?? currentZone();
+  return z.block.includes(workKind) && !z.allow.includes(workKind);
+}
+
+/**
+ * The next moment this work kind becomes allowed, scanning forward up to 24h at
+ * 5-min resolution. Returns null if it's allowed right now. Uses the forced zone
+ * if one is set (so a pinned block defers indefinitely → caller falls back to a
+ * fixed delay).
+ */
+export function nextAllowedAt(workKind: WorkKind, from = new Date()): Date | null {
+  if (!zoneBlocks(workKind)) return null;
+  if (process.env.ATELIER_FORCE_ZONE) return null; // a forced pin has no predictable exit
+  const baseDay = from.getDay();
+  const baseMin = from.getHours() * 60 + from.getMinutes();
+  for (let step = 5; step <= 24 * 60; step += 5) {
+    const total = baseMin + step;
+    const dayIdx = (baseDay + Math.floor(total / (24 * 60))) % 7;
+    const mins = total % (24 * 60);
+    const z = currentZone(mins, dayIdx);
+    if (!(z.block.includes(workKind) && !z.allow.includes(workKind))) {
+      const t = new Date(from.getTime() + step * 60_000);
+      t.setSeconds(0, 0);
+      return t;
+    }
+  }
+  return null; // blocked for the whole horizon (e.g. a forced pin)
 }
 
 // ── Routing advisor ──────────────────────────────────────────────────────────
