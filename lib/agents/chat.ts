@@ -13,8 +13,9 @@ import { enqueueHugoBuild } from '../jobs';
 import { getStyleCard, getDefaultBrandRubric } from '../style-repo';
 import { resolveSpec } from '../merge-ledger';
 import { systemHealth, formatHealth } from './otto';
-import { enqueueVeraResearch } from '../jobs';
+import { enqueueVeraResearch, enqueueMarloweReview } from '../jobs';
 import { recall, formatRecall } from './dewey';
+import { critique, formatCritique } from './marlowe';
 
 const PUBLIC_URL = process.env.ATELIER_PUBLIC_URL ?? 'http://192.168.4.200:3040';
 
@@ -76,6 +77,19 @@ async function runTool(slug: string, message: string): Promise<string | null> {
   if (slug === 'dewey' && /\b(recall|remember|what did we|have we|did we|decide|decided|notes? on|history|did i|what do we know)\b/i.test(m)) {
     const { hits, terms } = await recall(m);
     return formatRecall(m, hits, terms);
+  }
+
+  // Marlowe: critique. "review the latest copy" → background auto-review of Wren's
+  // last option set; "critique <text>" → red-team the supplied copy inline.
+  if (slug === 'marlowe' && /^(critique|review|red.?team|check|proof|tighten|edit)\b/i.test(m)) {
+    if (/\b(latest|last|the copy|the output|wren|headlines?|options?)\b/i.test(m) && !/[:"]/.test(m)) {
+      const jobId = await enqueueMarloweReview();
+      return `On it — reviewing Wren's latest option set against voice + your taste. I'll post my read to the project log shortly. · job ${jobId.slice(0, 8)}`;
+    }
+    const content = m.replace(/^(critique|review|red.?team|check|proof|tighten|edit)\b(\s+(this|that|this copy|the following)\s*:?)?/i, '').trim();
+    if (content.length < 3) return `Paste the copy and I'll red-team it — e.g. "critique: <your headline>".`;
+    const c = await critique(content);
+    return formatCritique(c, 'the copy');
   }
 
   return null;

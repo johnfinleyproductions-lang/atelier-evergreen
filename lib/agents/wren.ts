@@ -141,5 +141,13 @@ export async function wrenWriteHeadlines(slug: string): Promise<WrenRunResult> {
             ${sql.json({ agent: 'wren', latencyMs: gen.latencyMs } as never)})
   `;
 
-  return { ok: true, headlines: gen.headlines, decisionTaskId: tRows[0].id as string, latencyMs: gen.latencyMs };
+  // Auto-QC: Marlowe red-teams the option set in the background (non-blocking),
+  // logging his read to the project so it's there before Tyler decides.
+  const decisionTaskId = tRows[0].id as string;
+  try {
+    const { enqueueMarloweReview } = await import('../jobs');
+    void enqueueMarloweReview(decisionTaskId);
+  } catch { /* review is best-effort; never block Wren */ }
+
+  return { ok: true, headlines: gen.headlines, decisionTaskId, latencyMs: gen.latencyMs };
 }
