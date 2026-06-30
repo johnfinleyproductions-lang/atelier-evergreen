@@ -8,6 +8,55 @@
 import { sql } from '../db';
 import { ATELIER_WS } from '../atelier';
 import { recallTasteForPrompt } from '../taste-memory';
+import { generateHeadlines } from './wren';
+import { hugoBuild } from './hugo';
+import { getStyleCard, getDefaultBrandRubric } from '../style-repo';
+import { resolveSpec } from '../merge-ledger';
+
+const PUBLIC_URL = process.env.ATELIER_PUBLIC_URL ?? 'http://192.168.4.200:3040';
+
+// ── Real tools: when you ASK an agent to do something, it does it ──────────
+// Returns a result string when a tool fired, else null (→ conversational reply).
+async function runTool(slug: string, message: string): Promise<string | null> {
+  const m = message.trim();
+
+  // Wren: "headlines / copy / titles ..." → really generate them.
+  if (slug === 'wren' && /\b(headline|headlines|copy|titles?|tagline|hook|subject lines?)\b/i.test(m)) {
+    const taste = await recallTasteForPrompt('wren_option');
+    const g = await generateHeadlines(m, 6, taste);
+    if (!g.ok) return null;
+    return `Here are 6${taste ? ' (tuned to your taste)' : ''}:\n` + g.headlines.map((h, i) => `${i + 1}. ${h}`).join('\n');
+  }
+
+  // Hugo: an imperative "build/make/create ..." → really build + prove it.
+  if (slug === 'hugo' && /^(build|make|create|code)\b/i.test(m)) {
+    const r = await hugoBuild('launch-course-19', m.replace(/^(build|make|create|code)\b/i, '').trim() || m);
+    if (!r.ok) return `I hit a snag building that (${r.error}).`;
+    const link = r.screenshotRef ? ` View it: ${PUBLIC_URL}${r.screenshotRef}` : '';
+    return r.proofPass
+      ? `Built it with ${r.model} — render-QC passed ✓ (palette ΔE ${r.paletteDeltaE}, score ${r.matchScore}). It cleared the proof gate.${link}`
+      : `Built it, but it failed the on-brand QC (ΔE ${r.paletteDeltaE}) — not advancing it.${link}`;
+  }
+
+  // Iris: "design / style / layout ..." → resolve real brand+style direction.
+  if (slug === 'iris' && /^(design|style|lay\s?out|mock|theme)\b/i.test(m)) {
+    const card = await getStyleCard('@warm-editorial');
+    const rubric = await getDefaultBrandRubric();
+    if (!card) return null;
+    const r = resolveSpec(card as never, rubric as never);
+    const colors = (r.resolvedSpec.colors ?? {}) as Record<string, string>;
+    const dos = ((card as { do_rules?: string[] }).do_rules ?? []).slice(0, 3).join(' · ');
+    return [
+      `Here's the on-brand direction (merge ledger, @warm-editorial):`,
+      `• Colors (brand-locked): teal ${colors.teal} headline, gold ${colors.gold} CTA, ${colors.page} page, ${colors.ink} text`,
+      `• Layout: ${JSON.stringify(r.resolvedSpec.layout) === '{}' ? 'editorial-split, asymmetric hero' : 'from the style card'}; serif headline, generous spacing`,
+      dos ? `• Do: ${dos}` : '',
+      `Want Hugo to build it? Say "hugo: build ${m.replace(/^(design|style|lay\s?out|mock|theme)\b/i, '').trim()}".`,
+    ].filter(Boolean).join('\n');
+  }
+
+  return null;
+}
 
 const OLLAMA_URL = process.env.ATELIER_OLLAMA_URL ?? 'http://192.168.4.176:11434';
 const CHAT_MODEL = process.env.ATELIER_CHAT_MODEL ?? 'qwen3.5:9b';
@@ -70,6 +119,13 @@ export async function agentChat(slug: string, message: string, thread = 'default
   if (!agent) return { ok: false, reply: '', model: CHAT_MODEL, latencyMs: 0, usedTaste: false, error: 'AGENT_NOT_FOUND' };
   await save(slug, thread, 'user', message);
   try {
+    // First: did the user ASK the agent to do real work? If so, do it.
+    const toolResult = await runTool(slug, message);
+    if (toolResult !== null) {
+      await save(slug, thread, 'assistant', toolResult);
+      return { ok: true, reply: toolResult, model: 'tool', latencyMs: Date.now() - t0, usedTaste: slug === 'wren' };
+    }
+
     const history = await getThread(slug, thread, 20);
     const taste = TASTE_AGENTS.has(slug) ? await recallTasteForPrompt('wren_option') : '';
     const persona = personaFor(slug, agent.name, agent.role) + ' Keep replies short — Tyler reads by glancing.' + taste;
