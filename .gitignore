@@ -46,3 +46,6 @@ Thumbs.db
 
 # vercel
 .vercel
+
+# Visual-QA render artifacts (regenerated at runtime)
+public/uploads/atelier-qa/

@@ -9,7 +9,7 @@ import { sql } from '../db';
 import { ATELIER_WS } from '../atelier';
 import { recallTasteForPrompt } from '../taste-memory';
 import { generateHeadlines } from './wren';
-import { hugoBuild } from './hugo';
+import { enqueueHugoBuild } from '../jobs';
 import { getStyleCard, getDefaultBrandRubric } from '../style-repo';
 import { resolveSpec } from '../merge-ledger';
 
@@ -28,14 +28,13 @@ async function runTool(slug: string, message: string): Promise<string | null> {
     return `Here are 6${taste ? ' (tuned to your taste)' : ''}:\n` + g.headlines.map((h, i) => `${i + 1}. ${h}`).join('\n');
   }
 
-  // Hugo: an imperative "build/make/create ..." → really build + prove it.
+  // Hugo: an imperative "build/make/create ..." → kick off a background build.
+  // The coder model + Visual-QA gate take ~30–90s, so we enqueue and ack instantly
+  // instead of blocking the chat turn; the result lands in Latest Outputs.
   if (slug === 'hugo' && /^(build|make|create|code)\b/i.test(m)) {
-    const r = await hugoBuild('launch-course-19', m.replace(/^(build|make|create|code)\b/i, '').trim() || m);
-    if (!r.ok) return `I hit a snag building that (${r.error}).`;
-    const link = r.screenshotRef ? ` View it: ${PUBLIC_URL}${r.screenshotRef}` : '';
-    return r.proofPass
-      ? `Built it with ${r.model} — render-QC passed ✓ (palette ΔE ${r.paletteDeltaE}, score ${r.matchScore}). It cleared the proof gate.${link}`
-      : `Built it, but it failed the on-brand QC (ΔE ${r.paletteDeltaE}) — not advancing it.${link}`;
+    const brief = m.replace(/^(build|make|create|code)\b/i, '').trim() || m;
+    const jobId = await enqueueHugoBuild('launch-course-19', brief);
+    return `On it — building that now (qwen2.5-coder, then the on-brand QC gate; ~30–90s). It'll appear in the project's Latest Outputs once the proof passes. Track it: ${PUBLIC_URL}/project/launch-course-19 · job ${jobId.slice(0, 8)}`;
   }
 
   // Iris: "design / style / layout ..." → resolve real brand+style direction.

@@ -61,7 +61,9 @@ async function main() {
     process.exit(1);
   }
 
-  const migrationPath = resolve(ROOT, "drizzle", "0001_atelier_spine.sql");
+  // Default to the spine migration; allow `node scripts/apply-migration.mjs <file>`.
+  const migrationFile = process.argv[2] || "0001_atelier_spine.sql";
+  const migrationPath = resolve(ROOT, "drizzle", migrationFile);
   let migrationSql;
   try {
     migrationSql = readFileSync(migrationPath, "utf8");
@@ -77,9 +79,7 @@ async function main() {
   const sql = postgres(DATABASE_URL, { max: 1, onnotice: () => {} });
 
   try {
-    console.log(
-      "[apply-migration] Executing drizzle/0001_atelier_spine.sql (atelier_* spine)..."
-    );
+    console.log(`[apply-migration] Executing drizzle/${migrationFile} ...`);
     // postgres-js: sql.unsafe() uses the simple query protocol, which supports
     // multiple semicolon-separated statements in a single call.
     await sql.unsafe(migrationSql);
