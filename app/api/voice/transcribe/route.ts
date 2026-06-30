@@ -60,8 +60,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'NO_SPEECH' }, { status: 422 });
   }
 
-  // Without a createTask flag we just hand back the transcript.
-  if (!isTruthyFlag(form.get('createTask'))) {
+  // The createTask flag may arrive as a form field OR a ?createTask=1 query
+  // param. Without it we just hand back the transcript.
+  const wantTask =
+    isTruthyFlag(form.get('createTask')) ||
+    isTruthyFlag(new URL(req.url).searchParams.get('createTask'));
+  if (!wantTask) {
     return NextResponse.json({ text }, { status: 200 });
   }
 
