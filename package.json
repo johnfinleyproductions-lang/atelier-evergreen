@@ -19,7 +19,8 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zod": "^3.24.1",
-    "sharp": "^0.33.5"
+    "sharp": "^0.33.5",
+    "playwright-core": "^1.49.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
