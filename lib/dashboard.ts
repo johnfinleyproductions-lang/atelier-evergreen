@@ -58,7 +58,8 @@ export interface ProjectDashboard {
     confidence: number; // 0-100, from proof scores
   };
   briefing: { summary: string; bullets: string[] };
-  decision: { question: string; options: DecisionOption[] } | null;
+  decision: { taskId: string; question: string; options: DecisionOption[] } | null;
+  decidedAngle: string | null;
   flow: FlowStage[];
   outputs: OutputCard[];
   activity: ActivityItem[];
@@ -150,11 +151,16 @@ export async function getProjectDashboard(slug: string): Promise<ProjectDashboar
   });
 
   // ── Decision queue: a task kind='decision' with spec.options ──────────
-  const decisionTask = tasks.find((t) => t.kind === 'decision');
+  // Show only UNRESOLVED decisions (not yet shipped); surface the made choice.
+  const decisionTasks = tasks.filter((t) => t.kind === 'decision');
   let decision: ProjectDashboard['decision'] = null;
-  if (decisionTask) {
-    const spec = (decisionTask.spec ?? {}) as { question?: string; options?: DecisionOption[] };
-    if (spec.question && Array.isArray(spec.options)) decision = { question: spec.question, options: spec.options };
+  let decidedAngle: string | null = null;
+  for (const dt of decisionTasks) {
+    const spec = (dt.spec ?? {}) as { question?: string; options?: DecisionOption[]; chosenLabel?: string };
+    if (dt.state === 'shipped' && spec.chosenLabel) { decidedAngle = spec.chosenLabel; continue; }
+    if (!decision && spec.question && Array.isArray(spec.options)) {
+      decision = { taskId: dt.id as string, question: spec.question, options: spec.options };
+    }
   }
 
   // ── Outputs: proofs that produced a screenshot ───────────────────────
@@ -208,9 +214,44 @@ export async function getProjectDashboard(slug: string): Promise<ProjectDashboar
     kpis: { progressPct, agentsActive, agentsTotal: employees.length, tasksDone, tasksTotal, confidence },
     briefing,
     decision,
+    decidedAngle,
     flow,
     outputs,
     activity,
     knowledgeBases,
   };
+}
+
+/**
+ * Resolve a Decision Needed: record the chosen option, ship the decision task,
+ * and write it to the Dossier as a decision entry. The human's pick IS the
+ * proof for a decision, so this advances directly (no render proof needed).
+ */
+export async function resolveDecision(
+  taskId: string,
+  optionKey: string,
+): Promise<{ ok: boolean; chosenLabel: string | null }> {
+  const rows = (await sql`
+    select id, dossier_id, spec, assignee_employee_slug from atelier_task
+     where workspace_id = ${ATELIER_WS} and id = ${taskId} and kind = 'decision' limit 1
+  `) as unknown as Row[];
+  if (!rows[0]) return { ok: false, chosenLabel: null };
+  const spec = (rows[0].spec ?? {}) as { options?: DecisionOption[] };
+  const chosen = (spec.options ?? []).find((o) => o.key === optionKey);
+  const chosenLabel = chosen?.label ?? optionKey;
+
+  const nextSpec = { ...spec, chosen: optionKey, chosenLabel };
+  const dossierId = rows[0].dossier_id as string;
+  await sql`
+    update atelier_task
+       set state = 'shipped', shipped_at = now(), spec = ${sql.json(nextSpec as never)}
+     where id = ${taskId} and workspace_id = ${ATELIER_WS}
+  `;
+  await sql`
+    insert into atelier_dossier_entry
+      (workspace_id, dossier_id, task_id, employee_slug, entry_type, body, payload)
+    values (${ATELIER_WS}, ${dossierId}, ${taskId}, ${'cleo'}, ${'decision'},
+            ${`Decided: ${chosenLabel}`}, ${sql.json({ optionKey, chosenLabel } as never)})
+  `;
+  return { ok: true, chosenLabel };
 }

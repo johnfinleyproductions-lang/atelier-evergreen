@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import '../../dashboard.css';
 import { getProjectDashboard, listProjects, type FlowStage } from '@/lib/dashboard';
+import { DecisionCard } from './DecisionCard';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -153,13 +154,11 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
             </div>
 
             {d.decision ? (
-              <div className="card decision">
-                <h4>⚡ Decision Needed <span className="badge" style={{ background: '#3a2f12', color: 'var(--gold)', marginLeft: 'auto' }}>Important</span></h4>
-                <div className="q">{d.decision.question}</div>
-                {d.decision.options.map((o) => (
-                  <button className="opt" key={o.key}><div className="ol">{o.label}</div><div className="od">{o.detail}</div></button>
-                ))}
-                <button className="btn-primary" style={{ width: '100%', marginTop: 6 }}>Make Decision</button>
+              <DecisionCard taskId={d.decision.taskId} question={d.decision.question} options={d.decision.options} />
+            ) : d.decidedAngle ? (
+              <div className="card" style={{ borderColor: 'var(--teal)' }}>
+                <h4>✓ Decision Made</h4>
+                <div className="brief">Leading with <strong style={{ color: 'var(--teal)' }}>{d.decidedAngle}</strong> — recorded to the Dossier; the line continues.</div>
               </div>
             ) : null}
 
