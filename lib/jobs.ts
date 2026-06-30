@@ -17,6 +17,8 @@ import { ATELIER_WS } from './atelier';
 import { hugoBuild } from './agents/hugo';
 import { researchAndLog } from './agents/vera';
 import { reviewLatestWren } from './agents/marlowe';
+import { planAndLog } from './agents/lena';
+import { scriptAndLog } from './agents/remy';
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'error';
 
@@ -102,6 +104,8 @@ const RUNNERS: Record<string, (input: Record<string, unknown>) => Promise<unknow
     const taskId = (input.taskId as string) || undefined;
     return reviewLatestWren(taskId);
   },
+  lena_plan: async (input) => planAndLog((input.brief as string) || ''),
+  remy_script: async (input) => scriptAndLog((input.brief as string) || ''),
 };
 
 /** Run a claimed job to completion. Safe to fire-and-forget; never throws. */
@@ -152,4 +156,12 @@ export async function enqueueVeraResearch(brief: string): Promise<string> {
 
 export async function enqueueMarloweReview(taskId?: string): Promise<string> {
   return enqueueJob('marlowe_review', taskId ? { taskId } : {}, 'marlowe');
+}
+
+export async function enqueueLenaPlan(brief: string): Promise<string> {
+  return enqueueJob('lena_plan', { brief }, 'lena');
+}
+
+export async function enqueueRemyScript(brief: string): Promise<string> {
+  return enqueueJob('remy_script', { brief }, 'remy');
 }

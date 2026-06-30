@@ -13,7 +13,7 @@ import { enqueueHugoBuild } from '../jobs';
 import { getStyleCard, getDefaultBrandRubric } from '../style-repo';
 import { resolveSpec } from '../merge-ledger';
 import { systemHealth, formatHealth } from './otto';
-import { enqueueVeraResearch, enqueueMarloweReview } from '../jobs';
+import { enqueueVeraResearch, enqueueMarloweReview, enqueueLenaPlan, enqueueRemyScript } from '../jobs';
 import { recall, formatRecall } from './dewey';
 import { critique, formatCritique } from './marlowe';
 
@@ -90,6 +90,20 @@ async function runTool(slug: string, message: string): Promise<string | null> {
     if (content.length < 3) return `Paste the copy and I'll red-team it — e.g. "critique: <your headline>".`;
     const c = await critique(content);
     return formatCritique(c, 'the copy');
+  }
+
+  // Lena: "distribution / launch / channels / promote ..." → a channel plan.
+  if (slug === 'lena' && /^(distribution|distribute|launch|channels?|promote|plan|roll ?out|go to market|gtm)\b/i.test(m)) {
+    const brief = m.replace(/^(distribution|distribute|launch|channels?|promote|plan|roll ?out|go to market|gtm)\b(\s+(for|of|the|a|an|on|plan))?/i, '').trim() || m;
+    const jobId = await enqueueLenaPlan(brief);
+    return `On it — building a distribution plan for “${brief}” (audience, channels, sequence, CTA). I'll post it to the project log shortly. · job ${jobId.slice(0, 8)}`;
+  }
+
+  // Remy: "script / video / reel / shoot ..." → a short-form video script.
+  if (slug === 'remy' && /^(script|video|reel|short|shoot|storyboard|vsl|film)\b/i.test(m)) {
+    const brief = m.replace(/^(script|video|reel|short|shoot|storyboard|vsl|film)\b(\s+(for|of|the|a|an|about))?/i, '').trim() || m;
+    const jobId = await enqueueRemyScript(brief);
+    return `On it — drafting a short-form video script for “${brief}” (hook, beats, CTA). I'll post it to the project log shortly. · job ${jobId.slice(0, 8)}`;
   }
 
   return null;
