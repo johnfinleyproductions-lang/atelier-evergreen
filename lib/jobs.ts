@@ -15,6 +15,7 @@
 import { sql } from './db';
 import { ATELIER_WS } from './atelier';
 import { hugoBuild } from './agents/hugo';
+import { researchAndLog } from './agents/vera';
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'error';
 
@@ -92,6 +93,10 @@ const RUNNERS: Record<string, (input: Record<string, unknown>) => Promise<unknow
     const brief = (input.brief as string) || '';
     return hugoBuild(slug, brief);
   },
+  vera_research: async (input) => {
+    const brief = (input.brief as string) || '';
+    return researchAndLog(brief);
+  },
 };
 
 /** Run a claimed job to completion. Safe to fire-and-forget; never throws. */
@@ -134,4 +139,8 @@ export async function enqueueJob(
 
 export async function enqueueHugoBuild(slug: string, brief: string): Promise<string> {
   return enqueueJob('hugo_build', { slug, brief }, 'hugo');
+}
+
+export async function enqueueVeraResearch(brief: string): Promise<string> {
+  return enqueueJob('vera_research', { brief }, 'vera');
 }

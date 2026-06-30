@@ -13,6 +13,8 @@ import { enqueueHugoBuild } from '../jobs';
 import { getStyleCard, getDefaultBrandRubric } from '../style-repo';
 import { resolveSpec } from '../merge-ledger';
 import { systemHealth, formatHealth } from './otto';
+import { enqueueVeraResearch } from '../jobs';
+import { recall, formatRecall } from './dewey';
 
 const PUBLIC_URL = process.env.ATELIER_PUBLIC_URL ?? 'http://192.168.4.200:3040';
 
@@ -59,6 +61,21 @@ async function runTool(slug: string, message: string): Promise<string | null> {
   if (slug === 'otto' && /\b(health|status|healthy|green|services?|substrate|how are we|everything (ok|up)|systems?)\b/i.test(m)) {
     const h = await systemHealth();
     return formatHealth(h);
+  }
+
+  // Vera: "research / angles / look into ..." → kick off a background research
+  // plan. The local model can cold-load (~80s) on the shared GPU, so we enqueue
+  // and ack instantly; Vera posts the plan to the project log when it's ready.
+  if (slug === 'vera' && /^(research|angles?|investigate|explore|look into|dig into|find out|brief me)\b/i.test(m)) {
+    const brief = m.replace(/^(research|angles?|investigate|explore|look into|dig into|find out|brief me)\b(\s+(on|about|into))?/i, '').trim() || m;
+    const jobId = await enqueueVeraResearch(brief);
+    return `On it — researching “${brief}”. I'll post the plan (angles, key questions, what to verify) to the project log shortly. Cold model loads on the shared GPU can take a minute. · job ${jobId.slice(0, 8)}`;
+  }
+
+  // Dewey: "what did we decide / have we / recall ..." → real recall from memory.
+  if (slug === 'dewey' && /\b(recall|remember|what did we|have we|did we|decide|decided|notes? on|history|did i|what do we know)\b/i.test(m)) {
+    const { hits, terms } = await recall(m);
+    return formatRecall(m, hits, terms);
   }
 
   return null;
