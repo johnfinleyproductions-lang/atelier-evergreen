@@ -1,0 +1,31 @@
+{
+  "name": "atelier-evergreen",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Atelier — Cleo's Floor: a proof-gated production workspace that connects to the shared Evergreen Postgres (model-radar pattern).",
+  "scripts": {
+    "dev": "next dev -p 3040",
+    "build": "next build",
+    "start": "next start -p 3040",
+    "seed": "tsx scripts/seed.mjs",
+    "migrate": "node scripts/apply-migration.mjs",
+    "worker": "node scripts/atelier-worker.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.1",
+    "next": "^15.5.0",
+    "postgres": "^3.4.8",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "drizzle-kit": "^0.31.0",
+    "tsx": "^4.19.2",
+    "typescript": "5.8.3"
+  }
+}
