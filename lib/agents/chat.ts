@@ -13,6 +13,7 @@ import { enqueueHugoBuild } from '../jobs';
 import { getStyleCard, getDefaultBrandRubric } from '../style-repo';
 import { resolveSpec } from '../merge-ledger';
 import { systemHealth, formatHealth } from './otto';
+import { getLanesState, currentZone, formatLanes } from '../lanes';
 import { enqueueVeraResearch, enqueueMarloweReview, enqueueLenaPlan, enqueueRemyScript } from '../jobs';
 import { recall, formatRecall } from './dewey';
 import { critique, formatCritique } from './marlowe';
@@ -56,6 +57,12 @@ async function runTool(slug: string, message: string): Promise<string | null> {
       dos ? `• Do: ${dos}` : '',
       `Want Hugo to build it? Say "hugo: build ${m.replace(/^(design|style|lay\s?out|mock|theme)\b/i, '').trim()}".`,
     ].filter(Boolean).join('\n');
+  }
+
+  // Otto: "lanes / gpu / vram ..." → the live GPU lane map + active zone.
+  if (slug === 'otto' && /\b(lanes?|gpu|gpus|vram|model lane|scheduler|zone)\b/i.test(m)) {
+    const [lanes, zone] = [await getLanesState(), currentZone()];
+    return formatLanes(lanes, zone);
   }
 
   // Otto: "health / status / are we green / services ..." → a real live snapshot.

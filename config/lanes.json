@@ -1,0 +1,61 @@
+{
+  "_comment": "GPU lane registry + zone schedule for the Evergreen lane manager. M90t is the pinned-service host; Framerstation and vidbox are on-demand workers. VRAM totals for non-local hosts are nominal (we can only read Ollama's loaded-model VRAM remotely, not the card total). Edit roles/zones here.",
+  "lanes": [
+    {
+      "id": "m90t",
+      "name": "M90t / lynnthink",
+      "lan": "192.168.4.200",
+      "gpu": "RTX 5060 Ti",
+      "vramTotalMB": 16311,
+      "role": "pinned",
+      "ollama": "http://127.0.0.1:11434",
+      "local": true,
+      "note": "Control plane + pinned always-on services (VoxStation, TTS, Whisper, Atelier)."
+    },
+    {
+      "id": "framerstation",
+      "name": "Framerstation",
+      "lan": "192.168.4.176",
+      "gpu": "shared specialist worker",
+      "vramTotalMB": 16000,
+      "role": "on-demand",
+      "ollama": "http://192.168.4.176:11434",
+      "local": false,
+      "note": "Specialist model worker. OpenCode (qwen3.5:27b) + Atelier agents load here on-demand."
+    },
+    {
+      "id": "vidbox",
+      "name": "vidbox",
+      "lan": "192.168.4.187",
+      "gpu": "32GB image/video",
+      "vramTotalMB": 32000,
+      "role": "on-demand",
+      "ollama": null,
+      "llamacpp": "http://192.168.4.187:8092",
+      "local": false,
+      "note": "Image/video/Resolve/ComfyUI. llama.cpp (qwen3-coder-next) for heavy batch coding."
+    }
+  ],
+  "zones": [
+    {
+      "id": "work-hours",
+      "days": ["mon", "tue", "wed", "thu", "fri"],
+      "start": "09:00",
+      "end": "18:00",
+      "block": ["batch-heavy"],
+      "note": "Keep interactive lanes responsive; defer heavy/batch work."
+    },
+    {
+      "id": "overnight",
+      "days": ["sun", "mon", "tue", "wed", "thu", "fri", "sat"],
+      "start": "23:00",
+      "end": "06:00",
+      "allow": ["batch-heavy"],
+      "note": "Heavy/batch jobs welcome."
+    }
+  ],
+  "defaultZone": {
+    "id": "open",
+    "note": "Outside any defined zone: everything allowed, on-demand."
+  }
+}
