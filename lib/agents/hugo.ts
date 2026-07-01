@@ -18,6 +18,36 @@ import { renderAndScore } from '../visual-qa';
 const OLLAMA_URL = process.env.ATELIER_OLLAMA_URL ?? 'http://192.168.4.176:11434';
 const HUGO_MODEL = process.env.ATELIER_HUGO_MODEL ?? 'qwen2.5-coder:14b';
 
+// Heavy tier: the vidbox 80B coder (qwen3-coder-next) behind the M90t auto-swap
+// proxy (OpenAI-compatible, NOT Ollama). It evicts ComfyUI + cold-loads ~27GB on
+// first request, so it's slow to start and reserved for builds bigger than a card.
+const HUGO_HEAVY_URL = process.env.ATELIER_HUGO_HEAVY_URL ?? 'http://127.0.0.1:8092/v1';
+const HUGO_HEAVY_MODEL = process.env.ATELIER_HUGO_HEAVY_MODEL ?? 'qwen3-coder-next-UD-Q2_K_XL';
+
+/** Call the coder model. Light tier = Ollama on Framerstation; heavy = vidbox OpenAI-compat. */
+async function callCoder(heavy: boolean, system: string, user: string): Promise<{ ok: boolean; content: string; status: number }> {
+  if (heavy) {
+    const res = await fetch(`${HUGO_HEAVY_URL}/chat/completions`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: HUGO_HEAVY_MODEL, stream: false, temperature: 0.3,
+        messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+      signal: AbortSignal.timeout(300_000), // cold start (ComfyUI swap + 27GB load) + slow gen
+    });
+    if (!res.ok) return { ok: false, content: '', status: res.status };
+    const j = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    return { ok: true, content: j.choices?.[0]?.message?.content ?? '', status: 200 };
+  }
+  const res = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: HUGO_MODEL, stream: false, options: { temperature: 0.3 },
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!res.ok) return { ok: false, content: '', status: res.status };
+  const j = (await res.json()) as { message?: { content?: string } };
+  return { ok: true, content: j.message?.content ?? '', status: 200 };
+}
+
 export interface HugoBuildResult {
   ok: boolean;
   taskId: string | null;
@@ -46,11 +76,12 @@ function extractHtml(raw: string): string {
  * Visual-QA gate proves it (render + palette ΔE). On pass it advances through
  * the proof gate to review. Returns a typed result; never throws.
  */
-export async function hugoBuild(slug: string, brief: string, styleHandle = '@warm-editorial'): Promise<HugoBuildResult> {
+export async function hugoBuild(slug: string, brief: string, styleHandle = '@warm-editorial', heavy = false): Promise<HugoBuildResult> {
   const t0 = Date.now();
+  const model = heavy ? HUGO_HEAVY_MODEL : HUGO_MODEL;
   const base: HugoBuildResult = {
     ok: false, taskId: null, proofPass: false, matchScore: 0, paletteDeltaE: null,
-    screenshotRef: null, htmlBytes: 0, model: HUGO_MODEL, latencyMs: 0, reachedReview: false,
+    screenshotRef: null, htmlBytes: 0, model, latencyMs: 0, reachedReview: false,
   };
   try {
     // Resolve the brand-locked colors (so we can prove on-brand afterward).
@@ -73,19 +104,9 @@ export async function hugoBuild(slug: string, brief: string, styleHandle = '@war
       `Include: a short <h1>, one paragraph, and one <a> CTA button. Generous spacing, a serif headline.\n` +
       `Output ONLY the HTML document, starting with <!doctype html>.`;
 
-    const res = await fetch(`${OLLAMA_URL}/api/chat`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: HUGO_MODEL,
-        stream: false,
-        options: { temperature: 0.3 },
-        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-      }),
-    });
-    if (!res.ok) return { ...base, latencyMs: Date.now() - t0, error: `CODER_HTTP_${res.status}` };
-    const j = (await res.json()) as { message?: { content?: string } };
-    const html = extractHtml(j.message?.content ?? '');
+    const call = await callCoder(heavy, system, user);
+    if (!call.ok) return { ...base, latencyMs: Date.now() - t0, error: `CODER_HTTP_${call.status}` };
+    const html = extractHtml(call.content);
     if (!/<html|<!doctype|<body/i.test(html)) return { ...base, latencyMs: Date.now() - t0, error: 'NO_VALID_HTML' };
 
     // Prove it: render + palette ΔE vs the brand colors.
@@ -102,7 +123,7 @@ export async function hugoBuild(slug: string, brief: string, styleHandle = '@war
       status: qc.pass ? 'pass' : 'fail',
       score: qc.matchScore,
       threshold: 0.6,
-      detail: { agent: 'hugo', model: HUGO_MODEL, paletteDeltaE: qc.breakdown.paletteDeltaE?.max ?? null, screenshotRef: qc.screenshotRef, htmlBytes: html.length },
+      detail: { agent: 'hugo', model, paletteDeltaE: qc.breakdown.paletteDeltaE?.max ?? null, screenshotRef: qc.screenshotRef, htmlBytes: html.length },
     });
 
     let reachedReview = false;
@@ -116,14 +137,14 @@ export async function hugoBuild(slug: string, brief: string, styleHandle = '@war
       await sql`
         insert into atelier_dossier_entry (workspace_id, dossier_id, task_id, employee_slug, entry_type, body, payload)
         values (${ATELIER_WS}, ${dRows[0].id as string}, ${task.id}, 'hugo', 'asset',
-                ${`Wrote ${html.length}b of HTML with ${HUGO_MODEL} — render-QC ${qc.pass ? 'passed' : 'failed'} (${qc.matchScore})`},
+                ${`Wrote ${html.length}b of HTML with ${model} — render-QC ${qc.pass ? 'passed' : 'failed'} (${qc.matchScore})`},
                 ${sql.json({ agent: 'hugo', screenshotRef: qc.screenshotRef } as never)})`;
     }
 
     return {
       ok: true, taskId: task.id, proofPass: qc.pass, matchScore: qc.matchScore,
       paletteDeltaE: qc.breakdown.paletteDeltaE?.max ?? null, screenshotRef: qc.screenshotRef,
-      htmlBytes: html.length, model: HUGO_MODEL, latencyMs: Date.now() - t0, reachedReview,
+      htmlBytes: html.length, model, latencyMs: Date.now() - t0, reachedReview,
     };
   } catch (err) {
     return { ...base, latencyMs: Date.now() - t0, error: err instanceof Error ? err.message : 'HUGO_BUILD_FAILED' };

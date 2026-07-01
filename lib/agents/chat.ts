@@ -38,9 +38,12 @@ async function runTool(slug: string, message: string): Promise<string | null> {
   // The coder model + Visual-QA gate take ~30–90s, so we enqueue and ack instantly
   // instead of blocking the chat turn; the result lands in Latest Outputs.
   if (slug === 'hugo' && /^(build|make|create|code)\b/i.test(m)) {
+    const heavy = /\b(heavy|big|complex|full[\s-]?page|multi[\s-]?section|80b|large|advanced)\b/i.test(m);
     const brief = m.replace(/^(build|make|create|code)\b/i, '').trim() || m;
-    const jobId = await enqueueHugoBuild('launch-course-19', brief);
-    return `On it — building that now (qwen2.5-coder, then the on-brand QC gate; ~30–90s). It'll appear in the project's Latest Outputs once the proof passes. Track it: ${PUBLIC_URL}/project/launch-course-19 · job ${jobId.slice(0, 8)}`;
+    const jobId = await enqueueHugoBuild('launch-course-19', brief, heavy);
+    return heavy
+      ? `On it — HEAVY build with the vidbox 80B coder (qwen3-coder-next). It cold-starts (evicts ComfyUI, loads ~27GB) so give it a few minutes; it goes through the same on-brand QC gate and lands in Latest Outputs. Track it: ${PUBLIC_URL}/project/launch-course-19 · job ${jobId.slice(0, 8)}`
+      : `On it — building that now (qwen2.5-coder, then the on-brand QC gate; ~30–90s). It'll appear in the project's Latest Outputs once the proof passes. Track it: ${PUBLIC_URL}/project/launch-course-19 · job ${jobId.slice(0, 8)}`;
   }
 
   // Iris: "design / style / layout ..." → resolve real brand+style direction.

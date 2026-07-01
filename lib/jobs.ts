@@ -99,7 +99,7 @@ const RUNNERS: Record<string, (input: Record<string, unknown>) => Promise<unknow
   hugo_build: async (input) => {
     const slug = (input.slug as string) || 'launch-course-19';
     const brief = (input.brief as string) || '';
-    return hugoBuild(slug, brief);
+    return hugoBuild(slug, brief, '@warm-editorial', Boolean(input.heavy));
   },
   vera_research: async (input) => {
     const brief = (input.brief as string) || '';
@@ -135,7 +135,9 @@ export async function processJob(id: string): Promise<void> {
     }
     try {
       // Free the on-demand lane for this job's model first (kick idle models).
-      const model = JOB_MODEL[job.kind];
+      // Heavy Hugo builds run on the vidbox coder lane (its proxy manages ComfyUI),
+      // so skip the Framerstation kick for those.
+      const model = (job.kind === 'hugo_build' && job.input.heavy) ? undefined : JOB_MODEL[job.kind];
       if (model) {
         try {
           const { ensureAtelierLaneRoom } = await import('./lanes');
@@ -212,8 +214,8 @@ export async function runDueDeferredJobs(): Promise<{ started: string[]; stillDe
   return { started, stillDeferred: rest[0]?.n ?? 0 };
 }
 
-export async function enqueueHugoBuild(slug: string, brief: string): Promise<string> {
-  return enqueueJob('hugo_build', { slug, brief }, 'hugo');
+export async function enqueueHugoBuild(slug: string, brief: string, heavy = false): Promise<string> {
+  return enqueueJob('hugo_build', { slug, brief, heavy }, 'hugo');
 }
 
 export async function enqueueVeraResearch(brief: string): Promise<string> {
