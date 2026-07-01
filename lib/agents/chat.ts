@@ -13,6 +13,7 @@ import { enqueueHugoBuild } from '../jobs';
 import { getStyleCard, getDefaultBrandRubric } from '../style-repo';
 import { resolveSpec } from '../merge-ledger';
 import { systemHealth, formatHealth } from './otto';
+import { soulPersona } from '../souls';
 import { getLanesState, currentZone, formatLanes, kickIdle } from '../lanes';
 import { enqueueVeraResearch, enqueueMarloweReview, enqueueLenaPlan, enqueueRemyScript } from '../jobs';
 import { recall, formatRecall } from './dewey';
@@ -184,7 +185,10 @@ async function save(slug: string, thread: string, role: 'user' | 'assistant', co
 }
 
 function personaFor(slug: string, name: string, role: string): string {
-  return PERSONAS[slug] ?? `You are ${name}, Evergreen's ${role}. You're a sharp, concise teammate. Answer briefly and helpfully, in your domain. No fluff, no emoji.`;
+  // Prefer the agent's SOUL.md identity; fall back to the legacy inline persona.
+  return soulPersona(slug)
+    ?? PERSONAS[slug]
+    ?? `You are ${name}, Evergreen's ${role}. You're a sharp, concise teammate. Answer briefly and helpfully, in your domain. No fluff, no emoji.`;
 }
 
 /** Talk to any employee. Persists the turn, recalls taste where relevant, replies. */

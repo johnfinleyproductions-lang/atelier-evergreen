@@ -8,6 +8,7 @@
 import { sql } from '../db';
 import { ATELIER_WS } from '../atelier';
 import { recallTasteForPrompt } from '../taste-memory';
+import { soulPersona } from '../souls';
 
 const OLLAMA_URL = process.env.ATELIER_OLLAMA_URL ?? 'http://192.168.4.176:11434';
 const WREN_MODEL = process.env.ATELIER_WREN_MODEL ?? 'qwen3.5:9b';
@@ -47,7 +48,7 @@ export async function wrenChat(message: string, thread = 'default'): Promise<Wre
     const history = await getWrenThread(thread, 20);
     const taste = await recallTasteForPrompt('wren_option');
     const msgs = [
-      { role: 'system' as const, content: PERSONA + taste },
+      { role: 'system' as const, content: (soulPersona('wren') ?? PERSONA) + taste },
       ...history.slice(-12).map((m) => ({ role: m.role, content: m.content })),
     ];
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
