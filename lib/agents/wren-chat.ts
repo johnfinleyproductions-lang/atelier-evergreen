@@ -23,10 +23,14 @@ colleague. Keep replies short — he reads by glancing.`;
 export interface WrenMessage { role: 'user' | 'assistant'; content: string; createdAt: string }
 
 export async function getWrenThread(thread = 'default', limit = 30): Promise<WrenMessage[]> {
+  // Most recent `limit` messages, oldest → newest. (A plain `asc limit N` returns
+  // the FIRST N ever — long threads would chat against stale context.)
   const rows = (await sql`
-    select role, content, created_at from atelier_message
-     where workspace_id = ${ATELIER_WS} and agent_slug = 'wren' and thread = ${thread}
-     order by created_at asc limit ${limit}
+    select role, content, created_at from (
+      select role, content, created_at from atelier_message
+       where workspace_id = ${ATELIER_WS} and agent_slug = 'wren' and thread = ${thread}
+       order by created_at desc limit ${limit}
+    ) recent order by created_at asc
   `) as unknown as { role: string; content: string; created_at: string }[];
   return rows.map((r) => ({ role: r.role as 'user' | 'assistant', content: r.content, createdAt: r.created_at }));
 }

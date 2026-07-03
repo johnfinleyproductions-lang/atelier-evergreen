@@ -1,23 +1,55 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
 
-interface Msg { role: 'user' | 'assistant'; content: string }
+interface Msg { role: 'user' | 'assistant'; content: string; createdAt?: string }
+
+const msgKey = (m: Msg) => `${m.role}|${m.content}`;
 
 export function TalkChat({ slug, name, initial }: { slug: string; name: string; initial: Msg[] }) {
   const [msgs, setMsgs] = useState<Msg[]>(initial);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  // Poll cursor: newest server-side created_at we've seen. Locally-appended
+  // messages have no createdAt; the dedupe below absorbs their server copies.
+  const cursorRef = useRef<string | null>(initial.length ? initial[initial.length - 1].createdAt ?? null : null);
+  const busyRef = useRef(false);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs, busy]);
+
+  // Background jobs post report-backs ("Build passed — want Marlowe on it?")
+  // into this thread server-side; poll so they appear without a reload.
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      if (!alive || busyRef.current) return;
+      try {
+        const q = cursorRef.current ? `?after=${encodeURIComponent(cursorRef.current)}` : '';
+        const r = await fetch(`/api/chat/${slug}${q}`);
+        if (!r.ok) return;
+        const j = (await r.json()) as { messages?: Msg[] };
+        const fresh = j.messages ?? [];
+        if (!alive || !fresh.length) return;
+        const last = fresh[fresh.length - 1].createdAt;
+        if (last) cursorRef.current = last;
+        setMsgs((p) => {
+          const seen = new Set(p.map(msgKey));
+          const add = fresh.filter((m) => !seen.has(msgKey(m)));
+          return add.length ? [...p, ...add] : p;
+        });
+      } catch { /* offline tick — try again next interval */ }
+    };
+    const t = setInterval(tick, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, [slug]);
 
   async function send() {
     const m = text.trim(); if (!m || busy) return;
-    setText(''); setMsgs((p) => [...p, { role: 'user', content: m }]); setBusy(true);
+    setText(''); setMsgs((p) => [...p, { role: 'user', content: m }]); setBusy(true); busyRef.current = true;
     try {
       const r = await fetch(`/api/chat/${slug}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: m }) });
       const j = await r.json();
       setMsgs((p) => [...p, { role: 'assistant', content: j.ok ? j.reply : `(couldn't reach the model: ${j.error ?? 'error'})` }]);
-    } catch { setMsgs((p) => [...p, { role: 'assistant', content: '(request failed)' }]); } finally { setBusy(false); }
+    } catch { setMsgs((p) => [...p, { role: 'assistant', content: '(request failed)' }]); } finally { setBusy(false); busyRef.current = false; }
   }
 
   return (

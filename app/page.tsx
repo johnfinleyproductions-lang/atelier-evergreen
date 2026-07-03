@@ -91,6 +91,9 @@ export default async function CleosFloor() {
         <a href="/talk/cleo" style={{ display: "inline-block", marginLeft: 14, marginBottom: 10, fontSize: 13, fontWeight: 700, color: "#19c39a", textDecoration: "none" }}>
           💬 Talk to your team
         </a>
+        <a href="/scoreboard" style={{ display: "inline-block", marginLeft: 14, marginBottom: 10, fontSize: 13, fontWeight: 700, color: GOLD, textDecoration: "none" }}>
+          📊 Scoreboard
+        </a>
         <p style={{ margin: 0, fontSize: 15.5, color: INK_SOFT }}>
           <strong style={{ color: needsYou.length ? GOLD : INK_SOFT }}>
             {needsYou.length}

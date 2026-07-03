@@ -24,3 +24,11 @@ Ten AI employees of Evergreen Studio. Each has one real, machine-checkable job. 
 - **Otto ↔ John/Cleo** (health, capacity, batch go/no-go; hands the restart lever up, it isn't his).
 - **Dewey ← anyone** on the floor, at the moment they're about to make or remake a decision.
 - **Cleo → John**: decisions only, never a stream of pings.
+
+## Two layers per soul (+ one shared house style)
+- **`<slug>.soul.md`** — the **character bible**: rich third-person prose. This is where a soul is authored and where the full worldview lives. Not injected at runtime.
+- **`runtime/<slug>.md`** — the **runtime soul**: a compact second-person version (~350–400 words) that `soulPersona()` actually injects into the chat model. Small models follow direct "You are / You never" noticeably better than narrative third person, and long identity prose dilutes their instruction-following. Keeps Identity (2 sentences), Voice (tics + 3 example lines + never-sounds-like), Rules, Boundaries, Handoffs — drops the essayistic "How X thinks."
+- **`_shared.md`** — the **house style** appended to every persona: lead with the answer, prose not bullet-walls, no self-introduction or capability recitals, no manufactured follow-ups, volunteer the next step when work finishes, humor per the agent's dial (dropped on failures).
+- Each runtime soul ends with **Dials** — per-agent humor / verbosity / pushback settings (Otto: no humor, minimal words; Marlowe: maximum pushback; Dewey: bone-dry).
+
+**Editing rule:** change a character in the bible first, then reflect it in the runtime soul — the bible is canon, the runtime file is its compression. `soulPersona()` falls back to the bible if a runtime file is missing. Souls are cached per process; redeploy/restart to pick up edits.

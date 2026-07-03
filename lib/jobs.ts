@@ -16,9 +16,10 @@ import { sql } from './db';
 import { ATELIER_WS } from './atelier';
 import { hugoBuild } from './agents/hugo';
 import { researchAndLog } from './agents/vera';
-import { reviewLatestWren } from './agents/marlowe';
+import { reviewLatestWren, critique } from './agents/marlowe';
 import { planAndLog } from './agents/lena';
 import { scriptAndLog } from './agents/remy';
+import { logToProject } from './agents/context';
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'deferred';
 export type WorkKind = 'interactive' | 'batch-heavy';
@@ -109,6 +110,19 @@ const RUNNERS: Record<string, (input: Record<string, unknown>) => Promise<unknow
     const taskId = (input.taskId as string) || undefined;
     return reviewLatestWren(taskId);
   },
+  // Standalone critique of supplied copy (e.g. an accepted "want Marlowe to read
+  // the copy on it?" handoff after a Hugo build). Logs the read like reviewLatestWren.
+  marlowe_critique: async (input) => {
+    const content = (input.content as string) || '';
+    const subject = (input.subject as string) || 'the copy';
+    const c = await critique(content, subject);
+    const ok = !(c.error && !c.issues.length && !c.note);
+    if (ok) {
+      await logToProject('marlowe', `Marlowe's read (${c.verdict}) — ${subject}`,
+        { agent: 'marlowe', verdict: c.verdict, score: c.score, issues: c.issues });
+    }
+    return { ok, subject, critique: ok ? c : null, error: ok ? undefined : (c.error ?? 'NO_CRITIQUE_PARSED') };
+  },
   lena_plan: async (input) => planAndLog((input.brief as string) || ''),
   remy_script: async (input) => scriptAndLog((input.brief as string) || ''),
 };
@@ -118,6 +132,7 @@ const JOB_MODEL: Record<string, string> = {
   hugo_build: process.env.ATELIER_HUGO_MODEL ?? 'qwen2.5-coder:14b',
   vera_research: 'qwen3.5:9b',
   marlowe_review: 'qwen3.5:9b',
+  marlowe_critique: 'qwen3.5:9b',
   lena_plan: 'qwen3.5:9b',
   remy_script: 'qwen3.5:9b',
 };
@@ -146,8 +161,23 @@ export async function processJob(id: string): Promise<void> {
       }
       const result = await runner(job.input);
       await finishOk(id, result);
+      // Proactive report-back: the owning agent posts the result + a volunteered
+      // next step to their chat thread (souls house style). Best-effort.
+      if (job.agentSlug) {
+        try {
+          const { announceJobResult } = await import('./agents/handoffs');
+          await announceJobResult(job.kind, job.agentSlug, result);
+        } catch { /* never fail the job over a chat message */ }
+      }
     } catch (err) {
-      await finishErr(id, err instanceof Error ? err.message : 'JOB_FAILED');
+      const message = err instanceof Error ? err.message : 'JOB_FAILED';
+      await finishErr(id, message);
+      if (job.agentSlug) {
+        try {
+          const { announceJobError } = await import('./agents/handoffs');
+          await announceJobError(job.kind, job.agentSlug, message);
+        } catch { /* swallow */ }
+      }
     }
   } catch {
     try { await finishErr(id, 'JOB_RUNNER_CRASHED'); } catch { /* swallow */ }
@@ -224,6 +254,10 @@ export async function enqueueVeraResearch(brief: string): Promise<string> {
 
 export async function enqueueMarloweReview(taskId?: string): Promise<string> {
   return enqueueJob('marlowe_review', taskId ? { taskId } : {}, 'marlowe');
+}
+
+export async function enqueueMarloweCritique(content: string, subject: string): Promise<string> {
+  return enqueueJob('marlowe_critique', { content, subject }, 'marlowe');
 }
 
 export async function enqueueLenaPlan(brief: string): Promise<string> {

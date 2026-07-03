@@ -59,7 +59,21 @@ export interface HugoBuildResult {
   model: string;
   latencyMs: number;
   reachedReview: boolean;
+  /** Visible text content of the built page (tags stripped) — lets an accepted
+   *  "want Marlowe to read the copy?" handoff critique the real words. */
+  copyText?: string;
   error?: string;
+}
+
+/** The human-visible words of a page: styles/scripts out, tags stripped, whitespace collapsed. */
+function visibleCopy(html: string, max = 1200): string {
+  return html
+    .replace(/<(style|script)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
 }
 
 function extractHtml(raw: string): string {
@@ -145,6 +159,7 @@ export async function hugoBuild(slug: string, brief: string, styleHandle = '@war
       ok: true, taskId: task.id, proofPass: qc.pass, matchScore: qc.matchScore,
       paletteDeltaE: qc.breakdown.paletteDeltaE?.max ?? null, screenshotRef: qc.screenshotRef,
       htmlBytes: html.length, model, latencyMs: Date.now() - t0, reachedReview,
+      copyText: visibleCopy(html),
     };
   } catch (err) {
     return { ...base, latencyMs: Date.now() - t0, error: err instanceof Error ? err.message : 'HUGO_BUILD_FAILED' };
