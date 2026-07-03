@@ -137,7 +137,7 @@ export async function hugoBuild(slug: string, brief: string, styleHandle = '@war
       status: qc.pass ? 'pass' : 'fail',
       score: qc.matchScore,
       threshold: 0.6,
-      detail: { agent: 'hugo', model, paletteDeltaE: qc.breakdown.paletteDeltaE?.max ?? null, screenshotRef: qc.screenshotRef, htmlBytes: html.length },
+      detail: { agent: 'hugo', model, evidence: 'measured', paletteDeltaE: qc.breakdown.paletteDeltaE ?? null, screenshotRef: qc.screenshotRef, htmlBytes: html.length },
     });
 
     let reachedReview = false;

@@ -46,7 +46,9 @@ const QaInputSchema = z
     styleCardHandle: z.string().min(1).optional(),
     // DOM assertions are passed through to renderAndScore untouched.
     assertions: z.array(z.string()).optional(),
-    // Defaults to 'remy' — the render-QC checker — but may be overridden.
+    // Defaults to 'hugo' — the producer of the rendered artifact — but may be
+    // overridden. (Was 'remy': proofs for pages he never made landed on his
+    // scoreboard row and skewed his ΔE stats.)
     employeeSlug: z.string().min(1).optional(),
   })
   .refine((v) => Boolean(v.html) || Boolean(v.url), {
@@ -152,7 +154,7 @@ export async function POST(req: NextRequest) {
     //     preserved verbatim as the proof detail.
     const proof = await attachProof({
       taskId,
-      employeeSlug: employeeSlug ?? 'remy',
+      employeeSlug: employeeSlug ?? 'hugo',
       kind: 'render_qc',
       status,
       score: score ?? undefined,

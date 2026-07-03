@@ -90,7 +90,7 @@ export default async function ScoreboardPage({
           </strong>{" "}
           proofs passing ({pct(sb.totals.passRate)})
           {"  ·  "}
-          Marlowe on Wren&apos;s sets:{" "}
+          Marlowe&apos;s verdicts (LLM-judged):{" "}
           <strong style={{ color: TEAL }}>{sb.wrenReviews.ship} ship</strong> /{" "}
           <strong style={{ color: GOLD }}>{sb.wrenReviews.revise} revise</strong>
           {reviews ? ` (${Math.round((sb.wrenReviews.ship / reviews) * 100)}% first-pass)` : ""}
@@ -109,8 +109,8 @@ export default async function ScoreboardPage({
                 <th style={th}>Agent</th>
                 <th style={th}>Proof pass rate</th>
                 <th style={th}>vs prior {days}d</th>
-                <th style={th}>Avg score</th>
-                <th style={th}>Palette ΔE (avg / max)</th>
+                <th style={th}>Score by kind</th>
+                <th style={th}>Palette ΔE (mean / max)</th>
                 <th style={th}>Jobs (done / failed)</th>
                 <th style={th}>Avg job time</th>
               </tr>
@@ -130,11 +130,19 @@ export default async function ScoreboardPage({
                     ) : null}
                   </td>
                   <td style={td}><Trend now={a.proofs.passRate} prev={a.prevPassRate} /></td>
-                  <td style={td}>{a.proofs.avgScore != null ? a.proofs.avgScore.toFixed(2) : "—"}</td>
+                  <td style={td}>
+                    {a.kinds.length ? a.kinds.map((k) => (
+                      <span key={k.kind} style={{ display: "inline-block", marginRight: 10, whiteSpace: "nowrap" }}>
+                        <span style={{ color: INK_SOFT, fontSize: 12 }}>{k.kind}</span>{" "}
+                        {k.avgScore != null ? k.avgScore.toFixed(2) : "—"}
+                        <span style={{ color: INK_SOFT, fontSize: 12 }}>×{k.n}</span>
+                      </span>
+                    )) : "—"}
+                  </td>
                   <td style={td}>
                     {a.deltaE.n ? (
                       <>
-                        {fx(a.deltaE.avg)} / <span style={{ color: (a.deltaE.max ?? 0) > 10 ? RED : INK }}>{fx(a.deltaE.max)}</span>
+                        {fx(a.deltaE.mean)} / <span style={{ color: (a.deltaE.max ?? 0) > 30 ? RED : INK }}>{fx(a.deltaE.max)}</span>
                         <span style={{ color: INK_SOFT, fontSize: 12.5 }}> ({a.deltaE.n})</span>
                       </>
                     ) : "—"}
@@ -176,7 +184,7 @@ export default async function ScoreboardPage({
                 <th style={th}>Proofs</th>
                 <th style={th}>Pass rate</th>
                 <th style={th}>Avg score</th>
-                <th style={th}>Avg ΔE</th>
+                <th style={th}>ΔE (mean)</th>
               </tr>
             </thead>
             <tbody>

@@ -7,6 +7,7 @@
 // logs the script to the project. Pairs with the Resolve/Showrunner pipeline.
 
 import { projectContext, logToProject } from './context';
+import { createTask, moveTask, attachProof } from '../atelier';
 
 import { OLLAMA_KEEPALIVE } from '../ollama';
 const OLLAMA_URL = process.env.ATELIER_OLLAMA_URL ?? 'http://192.168.4.176:11434';
@@ -67,14 +68,53 @@ export async function videoScript(brief: string): Promise<VideoScript> {
   }
 }
 
-export async function scriptAndLog(brief: string): Promise<VideoScript & { logged: boolean }> {
+// ── Remy's proof gate, machine-checked in his own currency (per his soul's
+// four checks): shot+VO parity on every beat, a first-frame hook, exactly one
+// CTA, and a 30–60s runtime at read pace (~2.4 words/sec, with slack).
+export function scriptShapeProof(sc: { hook: string; beats: Beat[]; cta: string }): { status: 'pass' | 'fail'; score: number; detail: Record<string, unknown> } {
+  const parity = sc.beats.length > 0 && sc.beats.every((b) => b.onScreen.trim() && b.vo.trim());
+  const beatCount = sc.beats.length >= 3 && sc.beats.length <= 8;
+  const hookPresent = sc.hook.trim().length > 0;
+  const oneCta = sc.cta.trim().length > 0;
+  const words = [sc.hook, ...sc.beats.map((b) => b.vo), sc.cta].join(' ').split(/\s+/).filter(Boolean).length;
+  const estSeconds = Math.round(words / 2.4);
+  const runtimeOk = estSeconds >= 20 && estSeconds <= 75;
+  const checks = { shotVoParity: parity, beatCount, hookPresent, oneCta, runtimeOk };
+  const passed = Object.values(checks).filter(Boolean).length;
+  return {
+    status: passed === 5 ? 'pass' : 'fail',
+    score: Math.round((passed / 5) * 100) / 100,
+    detail: { evidence: 'measured', checks, estSeconds, words },
+  };
+}
+
+export async function scriptAndLog(brief: string): Promise<VideoScript & { logged: boolean; gatePassed?: boolean; estSeconds?: number }> {
   const sc = await videoScript(brief);
   let logged = false;
+  let gatePassed: boolean | undefined;
+  let estSeconds: number | undefined;
   if (sc.beats.length) {
     logged = await logToProject('remy', `Video script — ${brief}: "${sc.hook}"`,
       { agent: 'remy', hook: sc.hook, beats: sc.beats, cta: sc.cta });
+    // Attach the script-shape proof so Remy's work is measured like everyone
+    // else's (previously scripts produced zero proof rows). Best-effort: proof
+    // plumbing never fails the script. Passing scripts stop at 'proofed' —
+    // they don't enter John's review queue.
+    try {
+      const gate = scriptShapeProof(sc);
+      gatePassed = gate.status === 'pass';
+      estSeconds = gate.detail.estSeconds as number;
+      const task = await createTask({ title: `Script: ${brief}`.slice(0, 80), intent: brief, kind: 'script', assigneeSlug: 'remy' });
+      await moveTask(task.id, 'scoped');
+      await moveTask(task.id, 'active');
+      await attachProof({
+        taskId: task.id, employeeSlug: 'remy', kind: 'script_shape',
+        status: gate.status, score: gate.score, threshold: 1,
+        detail: { ...gate.detail, hook: sc.hook.slice(0, 120) },
+      });
+    } catch { /* never lose a script over proof bookkeeping */ }
   }
-  return { ...sc, logged };
+  return { ...sc, logged, gatePassed, estSeconds };
 }
 
 export function formatScript(s: VideoScript): string {

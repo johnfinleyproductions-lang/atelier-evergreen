@@ -27,7 +27,7 @@ export interface CritiqueIssue { problem: string; fix: string }
 export interface Critique {
   verdict: 'ship' | 'revise';
   onBrand: boolean;
-  score: number;            // 0..1, the model's on-voice read
+  score: number | null;     // 0..1, the model's on-voice read; null = the model gave none
   issues: CritiqueIssue[];
   note: string;
   model: string;
@@ -35,6 +35,9 @@ export interface Critique {
   error?: string;
 }
 
+// A formatting failure is "no read", never a fabricated verdict — a 9b JSON slip
+// must not be recorded as an editorial rejection (or a synthesized score) on the
+// scoreboard. Scores are only what the model actually said.
 function parseCritique(raw: string): Omit<Critique, 'model' | 'latencyMs'> {
   let s = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
   const a = s.indexOf('{'); const b = s.lastIndexOf('}');
@@ -47,7 +50,7 @@ function parseCritique(raw: string): Omit<Critique, 'model' | 'latencyMs'> {
           fix: String(x.fix ?? x.suggestion ?? '').trim(),
         })).filter((x) => x.problem).slice(0, 4)
       : [];
-    const score = typeof j.score === 'number' ? Math.max(0, Math.min(1, j.score as number)) : (j.onBrand ? 0.7 : 0.4);
+    const score = typeof j.score === 'number' ? Math.max(0, Math.min(1, j.score as number)) : null;
     const verdict = (j.verdict === 'ship' || j.verdict === 'revise') ? j.verdict
       : (issues.length === 0 ? 'ship' : 'revise');
     return {
@@ -56,7 +59,7 @@ function parseCritique(raw: string): Omit<Critique, 'model' | 'latencyMs'> {
       score, issues, note: String(j.note ?? '').trim(),
     };
   } catch {
-    return { verdict: 'revise', onBrand: false, score: 0, issues: [], note: '' };
+    return { verdict: 'revise', onBrand: false, score: null, issues: [], note: '' };
   }
 }
 
@@ -111,20 +114,29 @@ export async function reviewLatestWren(decisionTaskId?: string): Promise<ReviewR
   const content = `Question: ${question}\nOptions:\n` + options.map((o, i) => `${i + 1}. ${o.label}`).join('\n');
   const c = await critique(content, `these ${options.length} headline options`);
 
-  // Log Marlowe's read to the project so it shows in the log and Dewey can recall it.
+  // An unreadable model response is "no read", not a rejection — log it as such
+  // (no verdict key, so the scoreboard's ship/revise counts never include it).
+  const unreadable = !!c.error && !c.issues.length && !c.note;
   if (rows[0].dossier_id) {
-    const body = `Marlowe's read (${c.verdict}): ${c.note || (c.issues[0]?.problem ?? 'reviewed')}`;
+    const body = unreadable
+      ? `Marlowe couldn't get a clean read on the option set (${c.error})`
+      : `Marlowe's read (${c.verdict}): ${c.note || (c.issues[0]?.problem ?? 'reviewed')}`;
+    const payload = unreadable
+      ? { agent: 'marlowe', error: c.error }
+      : { agent: 'marlowe', verdict: c.verdict, score: c.score, issues: c.issues };
     await sql`
       insert into atelier_dossier_entry (workspace_id, dossier_id, task_id, employee_slug, entry_type, body, payload)
       values (${ATELIER_WS}, ${rows[0].dossier_id}, ${rows[0].id}, 'marlowe', 'note',
-              ${body}, ${sql.json({ agent: 'marlowe', verdict: c.verdict, score: c.score, issues: c.issues } as never)})`;
+              ${body}, ${sql.json(payload as never)})`;
   }
+  if (unreadable) return { ok: false, subject: question, decisionTaskId: rows[0].id, critique: null, error: c.error };
   return { ok: true, subject: question, decisionTaskId: rows[0].id, critique: c };
 }
 
 export function formatCritique(c: Critique, subject = 'this'): string {
   if (c.error && !c.issues.length && !c.note) return `I couldn't get a clean read on ${subject} (${c.error}).`;
-  const head = `${c.verdict === 'ship' ? '✅ Ship' : '✏️ Revise'} — ${subject}${c.note ? `: ${c.note}` : ''} (on-voice ${(c.score * 100).toFixed(0)}%)`;
+  const voice = c.score != null ? ` (on-voice ${(c.score * 100).toFixed(0)}%)` : '';
+  const head = `${c.verdict === 'ship' ? '✅ Ship' : '✏️ Revise'} — ${subject}${c.note ? `: ${c.note}` : ''}${voice}`;
   const lines = c.issues.map((it) => `  • ${it.problem}\n    → ${it.fix}`);
   return c.issues.length ? [head, ...lines].join('\n') : head;
 }

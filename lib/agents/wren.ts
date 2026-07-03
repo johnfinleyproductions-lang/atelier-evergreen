@@ -89,14 +89,36 @@ export async function generateHeadlines(brief: string, count = 6, tasteContext =
 
 // ── Wren in the flow: generate headlines → a Decision + an activity entry ──
 import { sql } from '../db';
-import { ATELIER_WS } from '../atelier';
+import { ATELIER_WS, attachProof, moveTask } from '../atelier';
 import { recallTasteForPrompt } from '../taste-memory';
+
+// ── The deterministic gate on an option set — Wren's proof, in her own currency.
+// Machine-checkable per her rules: enough genuinely distinct options, zero
+// banned words/emoji/exclamation spam (hard fail), nine-word cap (feeds score).
+const BANNED_WORDS = /\b(unlock|ultimate|game.?chang\w*|effortless)\b/i;
+const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/u;
+
+export function optionSetProof(headlines: string[]): { status: 'pass' | 'fail'; score: number; detail: Record<string, unknown> } {
+  const opts = headlines.map((h) => h.trim()).filter(Boolean);
+  const distinct = new Set(opts.map((o) => o.toLowerCase().replace(/[^a-z0-9 ]/g, ''))).size;
+  const bannedHits = opts.filter((o) => BANNED_WORDS.test(o) || EMOJI.test(o) || /!{2,}/.test(o));
+  const overNine = opts.filter((o) => o.split(/\s+/).length > 9).length;
+  const pass = distinct >= 3 && bannedHits.length === 0;
+  const score = opts.length ? Math.max(0, Math.round(((opts.length - overNine - bannedHits.length) / opts.length) * 100) / 100) : 0;
+  return {
+    status: pass ? 'pass' : 'fail',
+    score,
+    detail: { evidence: 'measured', options: opts.length, distinct, bannedHits, overNineWords: overNine },
+  };
+}
 
 export interface WrenRunResult {
   ok: boolean;
   headlines: string[];
   decisionTaskId: string | null;
   latencyMs: number;
+  /** Did the option set clear the deterministic gate (and so reach review)? */
+  gatePassed?: boolean;
   error?: string;
 }
 
@@ -127,12 +149,36 @@ export async function wrenWriteHeadlines(slug: string): Promise<WrenRunResult> {
 
   const options = gen.headlines.map((h, i) => ({ key: `h${i + 1}`, label: h, detail: `Option ${i + 1} · ${gen.model}` }));
   const spec = { agent: 'wren', model: gen.model, question: 'Which headline should we lead with?', options };
+  // Created 'active', not 'review' — the set has to EARN review through the same
+  // proof gate as everyone else (attachProof auto-advances to 'proofed' on pass,
+  // then moveTask walks it through the PROOF_REQUIRED check).
   const tRows = (await sql`
     insert into atelier_task (workspace_id, dossier_id, assignee_employee_slug, title, kind, state, spec, proof_status)
-    values (${ATELIER_WS}, ${did}, 'wren', 'Which headline should we lead with?', 'decision', 'review',
+    values (${ATELIER_WS}, ${did}, 'wren', 'Which headline should we lead with?', 'decision', 'active',
             ${sql.json(spec as never)}, 'pending')
     returning id
   `) as unknown as Record<string, unknown>[];
+
+  const gate = optionSetProof(gen.headlines);
+  await attachProof({
+    taskId: tRows[0].id as string,
+    employeeSlug: 'wren',
+    kind: 'option_set',
+    status: gate.status,
+    score: gate.score,
+    threshold: 0.5,
+    detail: gate.detail,
+  });
+  if (gate.status === 'pass') {
+    await moveTask(tRows[0].id as string, 'review'); // proofed → review, gate satisfied
+  } else {
+    await sql`
+      insert into atelier_dossier_entry (workspace_id, dossier_id, task_id, employee_slug, entry_type, body, payload)
+      values (${ATELIER_WS}, ${did}, ${tRows[0].id as string}, 'wren', 'note',
+              ${`Option set failed the deterministic gate (banned: ${JSON.stringify(gate.detail.bannedHits)}) — not surfaced.`},
+              ${sql.json({ agent: 'wren', gate: gate.detail } as never)})
+    `;
+  }
 
   await sql`
     insert into atelier_dossier_entry (workspace_id, dossier_id, task_id, employee_slug, entry_type, body, payload)
@@ -149,5 +195,9 @@ export async function wrenWriteHeadlines(slug: string): Promise<WrenRunResult> {
     void enqueueMarloweReview(decisionTaskId);
   } catch { /* review is best-effort; never block Wren */ }
 
-  return { ok: true, headlines: gen.headlines, decisionTaskId, latencyMs: gen.latencyMs };
+  return {
+    ok: true, headlines: gen.headlines, decisionTaskId, latencyMs: gen.latencyMs,
+    gatePassed: gate.status === 'pass',
+    error: gate.status === 'pass' ? undefined : 'OPTION_SET_FAILED_GATE',
+  };
 }

@@ -20,9 +20,14 @@ type Row = Record<string, unknown>;
 export interface AgentScore {
   slug: string;
   name: string;
-  proofs: { total: number; pass: number; passRate: number | null; avgScore: number | null; lastAt: string | null };
+  proofs: { total: number; pass: number; passRate: number | null; lastAt: string | null };
+  /** Per proof-kind score averages — scores only compare within a kind
+   *  (a binary build 1/0, a composite render matchScore, and an option-set
+   *  fraction are different units; one blended average means nothing). */
+  kinds: { kind: string; n: number; pass: number; avgScore: number | null }[];
   prevPassRate: number | null; // previous window, for the trend arrow
-  deltaE: { n: number; avg: number | null; max: number | null };
+  /** mean = brand fidelity; max = the tripwire (worst prominent swatch). */
+  deltaE: { n: number; mean: number | null; max: number | null };
   jobs: { total: number; done: number; error: number; avgSecs: number | null };
 }
 
@@ -55,12 +60,24 @@ export async function getScoreboard(windowDays = 30): Promise<Scoreboard> {
     select employee_slug,
            count(*)::int                                   as total,
            count(*) filter (where status = 'pass')::int    as pass,
-           avg(score)                                      as avg_score,
            max(created_at)                                 as last_at
       from atelier_proof
      where workspace_id = ${ATELIER_WS} and employee_slug is not null
        and created_at > now() - make_interval(days => ${windowDays})
      group by employee_slug
+  `) as unknown as Row[];
+
+  // Per (agent, kind) score averages — scores only mean something within a kind.
+  const kindAgg = (await sql`
+    select employee_slug, coalesce(kind, 'unknown') as kind,
+           count(*)::int                                as n,
+           count(*) filter (where status = 'pass')::int as pass,
+           avg(score)                                   as avg_score
+      from atelier_proof
+     where workspace_id = ${ATELIER_WS} and employee_slug is not null
+       and created_at > now() - make_interval(days => ${windowDays})
+     group by employee_slug, coalesce(kind, 'unknown')
+     order by count(*) desc
   `) as unknown as Row[];
 
   // Previous window (for trend): the windowDays before the current one.
@@ -75,15 +92,24 @@ export async function getScoreboard(windowDays = 30): Promise<Scoreboard> {
      group by employee_slug
   `) as unknown as Row[];
 
-  // Palette-ΔE spread per agent (only proofs that measured one).
+  // Palette-ΔE spread per agent. Three historical shapes coexist:
+  //   legacy scalar (the max), the new {mean,max,pass} object, and the /api/qa
+  //   verbatim blob (breakdown.paletteDeltaE.{mean,max}) — coalesce them all.
   const deAgg = (await sql`
     select employee_slug,
-           count(*)::int                          as n,
-           avg((detail->>'paletteDeltaE')::real)  as avg_de,
-           max((detail->>'paletteDeltaE')::real)  as max_de
+           count(*)::int as n,
+           avg(coalesce(
+             (detail->'paletteDeltaE'->>'mean')::real,
+             (detail#>>'{breakdown,paletteDeltaE,mean}')::real
+           )) as mean_de,
+           max(coalesce(
+             case when jsonb_typeof(detail->'paletteDeltaE') = 'number' then (detail->>'paletteDeltaE')::real end,
+             (detail->'paletteDeltaE'->>'max')::real,
+             (detail#>>'{breakdown,paletteDeltaE,max}')::real
+           )) as max_de
       from atelier_proof
      where workspace_id = ${ATELIER_WS} and employee_slug is not null
-       and detail->>'paletteDeltaE' is not null
+       and (detail ? 'paletteDeltaE' or detail#>'{breakdown,paletteDeltaE}' is not null)
        and created_at > now() - make_interval(days => ${windowDays})
      group by employee_slug
   `) as unknown as Row[];
@@ -109,7 +135,7 @@ export async function getScoreboard(windowDays = 30): Promise<Scoreboard> {
            count(*)::int                                as n,
            count(*) filter (where status = 'pass')::int as pass,
            avg(score)                                   as avg_score,
-           avg((detail->>'paletteDeltaE')::real)        as avg_de
+           avg((detail->'paletteDeltaE'->>'mean')::real) as avg_de
       from atelier_proof
      where workspace_id = ${ATELIER_WS} and detail->>'model' is not null
        and created_at > now() - make_interval(days => ${windowDays})
@@ -117,7 +143,8 @@ export async function getScoreboard(windowDays = 30): Promise<Scoreboard> {
      order by count(*) desc
   `) as unknown as Row[];
 
-  // Marlowe verdicts on Wren's sets (the revision-loop signal).
+  // Marlowe's logged verdicts — option-set reviews AND copy critiques.
+  // LLM-judged, kept out of the measured pass rates above by design.
   const verdictAgg = (await sql`
     select payload->>'verdict' as verdict, count(*)::int as n
       from atelier_dossier_entry
@@ -133,6 +160,13 @@ export async function getScoreboard(windowDays = 30): Promise<Scoreboard> {
   const prev = bySlug(prevAgg, 'employee_slug');
   const des = bySlug(deAgg, 'employee_slug');
   const jobs = bySlug(jobAgg, 'agent_slug');
+  const kindsBySlug = new Map<string, AgentScore['kinds']>();
+  for (const k of kindAgg) {
+    const slug = k.employee_slug as string;
+    const list = kindsBySlug.get(slug) ?? [];
+    list.push({ kind: k.kind as string, n: k.n as number, pass: k.pass as number, avgScore: num(k.avg_score) });
+    kindsBySlug.set(slug, list);
+  }
 
   const agents: AgentScore[] = employees
     .map((e) => {
@@ -147,11 +181,11 @@ export async function getScoreboard(windowDays = 30): Promise<Scoreboard> {
           total: (p?.total as number) ?? 0,
           pass: (p?.pass as number) ?? 0,
           passRate: p ? rate(p.pass as number, p.total as number) : null,
-          avgScore: num(p?.avg_score),
           lastAt: p?.last_at ? String(p.last_at) : null,
         },
+        kinds: kindsBySlug.get(e.slug) ?? [],
         prevPassRate: pv ? rate(pv.pass as number, pv.total as number) : null,
-        deltaE: { n: (d?.n as number) ?? 0, avg: num(d?.avg_de), max: num(d?.max_de) },
+        deltaE: { n: (d?.n as number) ?? 0, mean: num(d?.mean_de), max: num(d?.max_de) },
         jobs: {
           total: (j?.total as number) ?? 0,
           done: (j?.done as number) ?? 0,
@@ -203,10 +237,11 @@ export function formatScoreboard(sb: Scoreboard): string {
           s += `, ${d >= 0 ? '+' : ''}${d} vs prior ${sb.windowDays}d`;
         }
         s += ')';
-        if (a.proofs.avgScore != null) s += `, avg score ${a.proofs.avgScore.toFixed(2)}`;
+        const kindBits = a.kinds.filter((k) => k.avgScore != null).map((k) => `${k.kind} ${k.avgScore!.toFixed(2)}×${k.n}`);
+        if (kindBits.length) s += ` · ${kindBits.join(', ')}`;
         parts.push(s);
       }
-      if (a.deltaE.n) parts.push(`ΔE avg ${a.deltaE.avg?.toFixed(1)} / max ${a.deltaE.max?.toFixed(1)} over ${a.deltaE.n}`);
+      if (a.deltaE.n) parts.push(`ΔE mean ${a.deltaE.mean != null ? a.deltaE.mean.toFixed(1) : '—'} / max ${a.deltaE.max?.toFixed(1)} over ${a.deltaE.n}`);
       if (a.jobs.total) {
         let s = `jobs ${a.jobs.done}/${a.jobs.total} done`;
         if (a.jobs.error) s += `, ${a.jobs.error} failed`;
@@ -219,12 +254,12 @@ export function formatScoreboard(sb: Scoreboard): string {
   const out: string[] = [head];
   if (lines.length) out.push(...lines);
   if (sb.wrenReviews.ship + sb.wrenReviews.revise) {
-    out.push(`  Marlowe on Wren's sets: ${sb.wrenReviews.ship} ship / ${sb.wrenReviews.revise} revise.`);
+    out.push(`  Marlowe's verdicts (LLM-judged): ${sb.wrenReviews.ship} ship / ${sb.wrenReviews.revise} revise.`);
   }
   if (sb.models.length) {
     out.push('By model (proofs that recorded one):');
     for (const m of sb.models) {
-      out.push(`  ${m.model}: ${pct(m.passRate)} pass over ${m.n}${m.avgScore != null ? `, avg score ${m.avgScore.toFixed(2)}` : ''}${m.avgDeltaE != null ? `, ΔE avg ${m.avgDeltaE.toFixed(1)}` : ''}`);
+      out.push(`  ${m.model}: ${pct(m.passRate)} pass over ${m.n}${m.avgScore != null ? `, avg score ${m.avgScore.toFixed(2)}` : ''}${m.avgDeltaE != null ? `, ΔE mean ${m.avgDeltaE.toFixed(1)}` : ''}`);
     }
   }
   return out.join('\n');

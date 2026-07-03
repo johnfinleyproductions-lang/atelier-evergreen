@@ -35,10 +35,12 @@ async function postToThread(slug: string, content: string, meta?: Record<string,
 interface HugoR { ok: boolean; proofPass: boolean; matchScore: number; paletteDeltaE: number | null; copyText?: string; error?: string }
 interface VeraR { angles: string[]; grounded: boolean; error?: string }
 interface LenaR { audience: string; channels: { name: string; format?: string; angle?: string }[]; error?: string }
-interface RemyR { hook: string; beats: unknown[]; error?: string }
-interface MarloweR { ok: boolean; subject?: string; critique: { verdict: string; score: number; note: string; issues: { problem: string; fix?: string }[] } | null; error?: string }
+interface RemyR { hook: string; beats: unknown[]; gatePassed?: boolean; estSeconds?: number; error?: string }
+interface MarloweR { ok: boolean; subject?: string; critique: { verdict: string; score: number | null; note: string; issues: { problem: string; fix?: string }[] } | null; error?: string }
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
+// Marlowe's score is only what the model actually said — null when it gave none.
+const voice = (s: number | null) => (s != null ? ` (on-voice ${pct(s)}.)` : '');
 
 /**
  * The in-character completion message for a finished job: verdict first, then
@@ -85,7 +87,7 @@ export function jobCompletionMessage(kind: string, result: unknown): CompletionM
       }
       const c = r.critique;
       if (c.verdict === 'ship') {
-        return { text: `Ship. ${c.note || 'On-voice, nothing material to fix.'} (on-voice ${pct(c.score)}.) Cleared for your pick.` };
+        return { text: `Ship. ${c.note || 'On-voice, nothing material to fix.'}${voice(c.score)} Cleared for your pick.` };
       }
       const first = c.issues.length
         ? `${c.issues.length} thing${c.issues.length > 1 ? 's' : ''} — first: ${c.issues[0].problem}.`
@@ -106,10 +108,10 @@ export function jobCompletionMessage(kind: string, result: unknown): CompletionM
       }
       const c = r.critique;
       if (c.verdict === 'ship') {
-        return { text: `Read ${r.subject ?? 'it'}. Ship. ${c.note || 'On-voice, nothing material to fix.'} (on-voice ${pct(c.score)}.) Logged to the project.` };
+        return { text: `Read ${r.subject ?? 'it'}. Ship. ${c.note || 'On-voice, nothing material to fix.'}${voice(c.score)} Logged to the project.` };
       }
       const fixes = c.issues.slice(0, 3).map((i) => `• ${i.problem}${i.fix ? ` → ${i.fix}` : ''}`).join('\n');
-      return { text: `Read ${r.subject ?? 'it'}. Revise. (on-voice ${pct(c.score)}.)\n${fixes || c.note}\nLogged to the project; the fixes go back to the owner.` };
+      return { text: `Read ${r.subject ?? 'it'}. Revise.${voice(c.score)}\n${fixes || c.note}\nLogged to the project; the fixes go back to the owner.` };
     }
     case 'lena_plan': {
       const r = result as LenaR;
@@ -131,7 +133,10 @@ export function jobCompletionMessage(kind: string, result: unknown): CompletionM
       if (!r.beats?.length) {
         return { text: `No script — the angle wasn't sharp enough to hang a first frame on${r.error ? ` (${r.error})` : ''}. Send it back with the hook named and I'll shoot it.` };
       }
-      return { text: `Script's on the project log — hook: "${r.hook}", ${r.beats.length} beats, one CTA. Next stop is the Resolve pipeline when you're ready.` };
+      if (r.gatePassed === false) {
+        return { text: `Script's on the project log — hook: "${r.hook}", ${r.beats.length} beats — but it didn't clear my four-check gate${r.estSeconds ? ` (reads ~${r.estSeconds}s)` : ''}. I'd rework it before it goes anywhere; say "script …" again with a sharper angle.` };
+      }
+      return { text: `Script's on the project log — hook: "${r.hook}", ${r.beats.length} beats, one CTA${r.gatePassed ? `, cleared the four-check gate${r.estSeconds ? ` at ~${r.estSeconds}s` : ''}` : ''}. Next stop is the Resolve pipeline when you're ready.` };
     }
     default:
       return null; // unknown kind → stay silent rather than speak out of character

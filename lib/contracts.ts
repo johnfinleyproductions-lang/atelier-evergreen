@@ -32,6 +32,8 @@ export const PROOF_KINDS = [
   'passing_test',
   'render_qc',
   'lint',
+  'option_set',   // Wren: deterministic option-set gate (count/distinct/banned-words/9-word cap)
+  'script_shape', // Remy: deterministic script gate (shot+VO parity, hook, one CTA, runtime)
 ] as const;
 export const ProofKindSchema = z.enum(PROOF_KINDS);
 export type ProofKind = z.infer<typeof ProofKindSchema>;

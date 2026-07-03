@@ -130,7 +130,10 @@ export async function renderAndScore(input: RenderAndScoreInput): Promise<Render
     if (wantColors.length) {
       const shot = await readFile(file);
       const rendered: PaletteSwatch[] = await extractPalette(shot);
-      // weight-filter trivial noise swatches (< 4% of pixels)
+      // weight-filter trivial noise swatches (< 0.8% of pixels). NOTE: this is
+      // deliberately loose so small foreign accents can't hide from the gate —
+      // the cost is that antialiased blend swatches set the MAX, so read the
+      // mean for brand fidelity and treat max as the tripwire.
       const totalW = rendered.reduce((a, s) => a + s.weight, 0) || 1;
       const prominent = rendered.filter((s) => s.weight / totalW >= 0.008);
       const deltas = (prominent.length ? prominent : rendered).map((s) => {

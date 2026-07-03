@@ -110,7 +110,7 @@ export async function runAtelierZero(input: AtelierZeroInput): Promise<AtelierZe
     const proofStatus = qc.pass ? 'pass' : 'fail';
     await attachProof({
       taskId: task.id,
-      employeeSlug: 'remy', // the eyes
+      employeeSlug: 'hugo', // the producer of the artifact (was 'remy', which polluted his scoreboard row)
       kind: 'render_qc',
       status: proofStatus,
       score: qc.matchScore,
@@ -118,7 +118,10 @@ export async function runAtelierZero(input: AtelierZeroInput): Promise<AtelierZe
       detail: {
         gate: 'atelier-zero',
         styleHandle,
-        paletteDeltaE: qc.breakdown.paletteDeltaE?.max ?? null,
+        evidence: 'measured',
+        // full {mean, max, pass} — a scalar max alone reads as brand drift when
+        // it's really the worst antialiased blend swatch
+        paletteDeltaE: qc.breakdown.paletteDeltaE ?? null,
         screenshotRef: qc.screenshotRef,
         conflicts,
       },
