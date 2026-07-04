@@ -54,7 +54,7 @@ export function TalkChat({ slug, name, initial }: { slug: string; name: string; 
 
   return (
     <div className="card" style={{ marginTop: 18, padding: 0, overflow: 'hidden' }}>
-      <div style={{ maxHeight: 540, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ maxHeight: 'min(540px, calc(100dvh - 280px))', overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {msgs.length === 0 ? <div style={{ color: 'var(--faint)', fontSize: 13 }}>Say hi to {name}.</div> : null}
         {msgs.map((m, i) => (
           <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '82%' }}>

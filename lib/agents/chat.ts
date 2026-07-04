@@ -28,6 +28,7 @@ import { getLanesState, currentZone, formatLanes, kickIdle } from '../lanes';
 import { enqueueVeraResearch, enqueueMarloweReview, enqueueLenaPlan, enqueueRemyScript, enqueueMarloweCritique } from '../jobs';
 import { recall, formatRecall } from './dewey';
 import { critique, formatCritique } from './marlowe';
+import { OLLAMA_KEEPALIVE } from '../ollama';
 import type { NextStep } from './handoffs';
 
 const PUBLIC_URL = process.env.ATELIER_PUBLIC_URL ?? 'http://192.168.4.200:3040';
@@ -290,6 +291,24 @@ async function executeNextStep(step: NextStep): Promise<string> {
 const OLLAMA_URL = process.env.ATELIER_OLLAMA_URL ?? 'http://192.168.4.176:11434';
 const CHAT_MODEL = process.env.ATELIER_CHAT_MODEL ?? 'qwen3.5:9b';
 
+// Per-agent sampling dials. One flat 0.7 made Otto ("verdict, lane, number") as
+// creative as Wren; the job lanes already tune per agent — chat now matches.
+// num_ctx: the composed soul+house-style+taste is ~1k tokens plus 12 history
+// turns; Ollama's 4096 default silently truncates old history under load.
+const CHAT_DIALS: Record<string, { temperature: number }> = {
+  cleo: { temperature: 0.6 },
+  wren: { temperature: 0.8 },
+  iris: { temperature: 0.6 },
+  hugo: { temperature: 0.4 },
+  vera: { temperature: 0.7 },
+  lena: { temperature: 0.6 },
+  remy: { temperature: 0.8 },
+  marlowe: { temperature: 0.4 },
+  dewey: { temperature: 0.2 },
+  otto: { temperature: 0.3 },
+};
+const CHAT_NUM_CTX = Number(process.env.ATELIER_CHAT_NUM_CTX ?? 8192);
+
 // Role-flavored personas. Keyed by slug; falls back to a generic one.
 const PERSONAS: Record<string, string> = {
   cleo: `You are Cleo, Evergreen's Studio Director / chief of staff. You manage the team and Tyler's attention. You're warm, decisive, and brief. You summarize what's happening, route work to the right specialist, and surface only what needs a decision. You never do the specialist work yourself — you delegate and keep the floor moving.`,
@@ -304,7 +323,11 @@ const PERSONAS: Record<string, string> = {
   otto: `You are Otto, Evergreen's ops/SRE. You keep the substrate healthy. Calm, terse, reassuring. You talk about service health, GPU lanes, and what's green vs at risk.`,
 };
 
-const TASTE_AGENTS = new Set(['wren', 'iris', 'marlowe', 'cleo']);
+// Which learned-taste stream (if any) each agent recalls in chat. Wren writes
+// against it; Marlowe judges against it. Iris and Cleo were dropped: injecting
+// Wren's headline picks as "match this voice" into a designer and a router is
+// off-domain noise a 9b obeys literally.
+const TASTE_KINDS: Record<string, string> = { wren: 'wren_option', marlowe: 'wren_option' };
 
 export interface ChatMessage { role: 'user' | 'assistant'; content: string; createdAt: string }
 export interface AgentChatResult { ok: boolean; reply: string; model: string; latencyMs: number; usedTaste: boolean; error?: string }
@@ -351,11 +374,14 @@ async function save(slug: string, thread: string, role: 'user' | 'assistant', co
             values (${ATELIER_WS}, ${slug}, ${thread}, ${role}, ${content}, ${sql.json((meta ?? {}) as never)})`;
 }
 
-function personaFor(slug: string, name: string, role: string): string {
-  // Prefer the agent's SOUL.md identity; fall back to the legacy inline persona.
-  return soulPersona(slug)
-    ?? PERSONAS[slug]
+function personaFor(slug: string, name: string, role: string, taste = ''): string {
+  // Prefer the agent's SOUL.md identity (which composes taste BEFORE its coda —
+  // never append after it); fall back to the legacy inline persona + taste.
+  const withSoul = soulPersona(slug, taste);
+  if (withSoul) return withSoul;
+  const legacy = PERSONAS[slug]
     ?? `You are ${name}, Evergreen's ${role}. You're a sharp, concise teammate. Answer briefly and helpfully, in your domain. No fluff, no emoji.`;
+  return legacy + taste;
 }
 
 /** Talk to any employee. Persists the turn, recalls taste where relevant, replies. */
@@ -373,15 +399,23 @@ export async function agentChat(slug: string, message: string, thread = 'default
     }
 
     const history = await getThread(slug, thread, 20);
-    const taste = TASTE_AGENTS.has(slug) ? await recallTasteForPrompt('wren_option') : '';
-    const persona = personaFor(slug, agent.name, agent.role) + ' Keep replies short — Tyler reads by glancing.' + taste;
+    const taste = TASTE_KINDS[slug] ? await recallTasteForPrompt(TASTE_KINDS[slug]) : '';
+    const persona = personaFor(slug, agent.name, agent.role, taste);
     const msgs = [
       { role: 'system' as const, content: persona },
       ...history.slice(-12).map((m) => ({ role: m.role, content: m.content })),
     ];
+    const dial = CHAT_DIALS[slug] ?? { temperature: 0.7 };
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: CHAT_MODEL, stream: false, options: { temperature: 0.7 }, messages: msgs }),
+      body: JSON.stringify({
+        model: CHAT_MODEL, stream: false, keep_alive: OLLAMA_KEEPALIVE,
+        // qwen3-family models default to thinking mode; chat only reads
+        // message.content, so hidden reasoning is pure wasted latency.
+        ...(/qwen3/i.test(CHAT_MODEL) ? { think: false } : {}),
+        options: { temperature: dial.temperature, num_ctx: CHAT_NUM_CTX },
+        messages: msgs,
+      }),
     });
     if (!res.ok) return { ok: false, reply: '', model: CHAT_MODEL, latencyMs: Date.now() - t0, usedTaste: !!taste, error: `OLLAMA_HTTP_${res.status}` };
     const j = (await res.json()) as { message?: { content?: string } };

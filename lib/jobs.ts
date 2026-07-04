@@ -218,12 +218,71 @@ export async function enqueueJob(
   return id;
 }
 
+// How long each kind may sit 'running' before the watchdog reclaims it. Runner
+// fetches have their own AbortSignal timeouts, so a stale 'running' row almost
+// always means the process died/restarted mid-job (the floating promise is gone).
+const JOB_TIMEOUT_MIN: Record<string, number> = {
+  hugo_build: 12, vera_research: 8, marlowe_review: 6, marlowe_critique: 6, lena_plan: 8, remy_script: 8,
+};
+
+/**
+ * Watchdog sweep: reclaim jobs orphaned by a restart/crash.
+ *  - 'running' past its per-kind timeout → requeue once; twice → error + honest
+ *    announce (never a silent vanish).
+ *  - 'queued' with no start after 3m (enqueue raced a restart) → re-fire; the
+ *    atomic claim makes this idempotent.
+ */
+export async function reclaimOrphanedJobs(): Promise<{ requeued: number; errored: number; refired: number }> {
+  let requeued = 0, errored = 0, refired = 0;
+  const stale = (await sql`
+    select id, kind, agent_slug, input, started_at from atelier_job
+     where workspace_id = ${ATELIER_WS} and status = 'running'
+       and started_at < now() - interval '4 minutes'
+     limit 20
+  `) as unknown as { id: string; kind: string; agent_slug: string | null; input: Record<string, unknown>; started_at: string }[];
+  for (const j of stale) {
+    const limitMin = JOB_TIMEOUT_MIN[j.kind] ?? 10;
+    if (Date.now() - new Date(j.started_at).getTime() < limitMin * 60_000) continue;
+    const reclaims = Number((j.input as { __reclaims?: number }).__reclaims ?? 0);
+    if (reclaims >= 1) {
+      await finishErr(j.id, `ORPHANED_TWICE (ran past ${limitMin}m twice, likely dying mid-job)`);
+      errored++;
+      if (j.agent_slug) {
+        try {
+          const { announceJobError } = await import('./agents/handoffs');
+          await announceJobError(j.kind, j.agent_slug, 'the job kept dying mid-run (service restarts?) — gave up after two attempts');
+        } catch { /* best-effort */ }
+      }
+      continue;
+    }
+    const won = (await sql`
+      update atelier_job
+         set status = 'queued', started_at = null,
+             input = jsonb_set(coalesce(input, '{}'::jsonb), '{__reclaims}', to_jsonb(${reclaims + 1}::int))
+       where id = ${j.id} and workspace_id = ${ATELIER_WS} and status = 'running'
+       returning id
+    `) as unknown as Record<string, unknown>[];
+    if (won.length) { requeued++; void processJob(j.id); }
+  }
+  // Never-claimed queued rows (the fire-and-forget promise died before claim()).
+  const unstarted = (await sql`
+    select id from atelier_job
+     where workspace_id = ${ATELIER_WS} and status = 'queued' and started_at is null
+       and created_at < now() - interval '3 minutes'
+     limit 20
+  `) as unknown as { id: string }[];
+  for (const j of unstarted) { refired++; void processJob(j.id); }
+  return { requeued, errored, refired };
+}
+
 /**
  * Run any deferred jobs that are now due (run_after passed) and whose zone no
  * longer blocks them. Promotes them to 'queued' and fires them. Called by the
  * in-process ticker (instrumentation.ts) and exposed for a manual/cron trigger.
+ * Also runs the orphan watchdog each sweep.
  */
 export async function runDueDeferredJobs(): Promise<{ started: string[]; stillDeferred: number }> {
+  try { await reclaimOrphanedJobs(); } catch { /* watchdog is best-effort */ }
   const due = (await sql`
     select id, work_kind from atelier_job
      where workspace_id = ${ATELIER_WS} and status = 'deferred' and run_after <= now()

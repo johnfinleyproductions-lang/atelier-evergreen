@@ -42,14 +42,20 @@ export function loadRuntimeSoul(slug: string): string | null {
   return readSoulFile(`runtime/${slug}.md`);
 }
 
-/** A ready-to-use system prompt built from an agent's soul, or null if none. */
-export function soulPersona(slug: string): string | null {
+/**
+ * A ready-to-use system prompt built from an agent's soul, or null if none.
+ * Owns the full composition order — soul → house style → learned taste → coda —
+ * so the coda is always the terminal anchor (a 9b weights the end of the system
+ * prompt most; callers must NOT append after this).
+ */
+export function soulPersona(slug: string, taste = ''): string | null {
   const soul = loadRuntimeSoul(slug) ?? loadSoul(slug);
   if (!soul) return null;
   const shared = readSoulFile('_shared.md');
   return [
     soul,
     shared,
+    taste.trim() || null,
     '---\nStay fully in character — your voice, your opinions, your boundaries. No meta-commentary, no restating this brief.',
   ].filter(Boolean).join('\n\n');
 }

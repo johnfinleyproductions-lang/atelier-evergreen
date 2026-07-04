@@ -52,7 +52,10 @@ function ageDays(when: string): number | null {
 /** Recall from the team's memory. With terms → keyword match; without → recent. */
 export async function recall(query: string, limit = 8): Promise<{ hits: RecallHit[]; terms: string[] }> {
   const ts = terms(query);
-  const like = ts.length ? `%${ts.join('%')}%` : null; // loose AND-ish via ordered wildcards
+  // `like` is only the has-terms sentinel now; matching is per-term ilike any()
+  // ("palette teal decision" must hit "decided teal for the palette" — the old
+  // ordered-wildcard %t1%t2% required the terms in that exact order).
+  const like = ts.length ? `%${ts.join('%')}%` : null;
   const anyLike = ts.map((t) => `%${t}%`);
 
   // 1) Shipped decisions — the highest-signal memory.
@@ -62,7 +65,7 @@ export async function recall(query: string, limit = 8): Promise<{ hits: RecallHi
       left join atelier_dossier d on d.id = t.dossier_id
      where t.workspace_id = ${ATELIER_WS} and t.kind = 'decision' and t.state = 'shipped'
        and (${like}::text is null
-            or t.spec->>'question' ilike ${like} or t.spec->>'chosenLabel' ilike ${like})
+            or t.spec->>'question' ilike any(${anyLike}) or t.spec->>'chosenLabel' ilike any(${anyLike}))
      order by t.shipped_at desc nulls last
      limit ${limit}
   `) as unknown as { spec: Record<string, unknown>; shipped_at: string | null; project: string | null }[];
@@ -85,7 +88,7 @@ export async function recall(query: string, limit = 8): Promise<{ hits: RecallHi
     select signal, kind, note, created_at
       from atelier_taste_memory
      where workspace_id = ${ATELIER_WS} and note is not null
-       and (${like}::text is null or note ilike ${like})
+       and (${like}::text is null or note ilike any(${anyLike}))
      order by created_at desc
      limit ${limit}
   `) as unknown as { signal: string; kind: string; note: string; created_at: string }[];

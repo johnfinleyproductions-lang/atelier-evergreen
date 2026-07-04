@@ -52,13 +52,19 @@ export async function wrenChat(message: string, thread = 'default'): Promise<Wre
     const history = await getWrenThread(thread, 20);
     const taste = await recallTasteForPrompt('wren_option');
     const msgs = [
-      { role: 'system' as const, content: (soulPersona('wren') ?? PERSONA) + taste },
+      // soulPersona composes taste BEFORE its terminal coda; never append after it.
+      { role: 'system' as const, content: soulPersona('wren', taste) ?? (PERSONA + taste) },
       ...history.slice(-12).map((m) => ({ role: m.role, content: m.content })),
     ];
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: WREN_MODEL, stream: false, options: { temperature: 0.7 }, messages: msgs }),
+      body: JSON.stringify({
+        model: WREN_MODEL, stream: false,
+        ...(/qwen3/i.test(WREN_MODEL) ? { think: false } : {}),
+        options: { temperature: 0.8, num_ctx: Number(process.env.ATELIER_CHAT_NUM_CTX ?? 8192) },
+        messages: msgs,
+      }),
     });
     if (!res.ok) return { ok: false, reply: '', model: WREN_MODEL, latencyMs: Date.now() - t0, usedTaste: !!taste, error: `OLLAMA_HTTP_${res.status}` };
     const j = (await res.json()) as { message?: { content?: string } };

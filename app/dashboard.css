@@ -119,3 +119,17 @@
 .feed .who { font-size: 12px; font-weight: 600; }
 .feed .what { font-size: 11px; color: var(--muted); }
 .feed .when { font-size: 10px; color: var(--faint); margin-left: auto; white-space: nowrap; }
+
+/* ── mobile: collapse the fixed 220px sidebar + 340px rail to one column ── */
+@media (max-width: 760px) {
+  .dash { grid-template-columns: 1fr; }
+  .dash-nav {
+    position: static; height: auto;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px;
+    padding: 12px 14px; border-right: none; border-bottom: 1px solid var(--line);
+  }
+  .dash-nav .group { width: 100%; margin: 6px 0 2px; }
+  .dash-brand { margin-bottom: 4px; margin-right: 12px; }
+  .dash-main { padding: 18px 14px 48px; }
+  .dash-wrap { grid-template-columns: 1fr; }
+}
