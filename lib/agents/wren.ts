@@ -161,7 +161,9 @@ export async function wrenWriteHeadlines(slug: string): Promise<WrenRunResult> {
   `;
 
   const options = gen.headlines.map((h, i) => ({ key: `h${i + 1}`, label: h, detail: `Option ${i + 1} · ${gen.model}` }));
-  const spec = { agent: 'wren', model: gen.model, question: 'Which headline should we lead with?', options };
+  // soulVersion in the spec lets Marlowe's read (and Tyler's pick) be attributed
+  // to the soul that wrote the set — the other half of the soul A/B.
+  const spec = { agent: 'wren', model: gen.model, soulVersion: soulVersion('wren') ?? 'inline', question: 'Which headline should we lead with?', options };
   // Created 'active', not 'review' — the set has to EARN review through the same
   // proof gate as everyone else (attachProof auto-advances to 'proofed' on pass,
   // then moveTask walks it through the PROOF_REQUIRED check).

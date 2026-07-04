@@ -123,9 +123,12 @@ export async function reviewLatestWren(decisionTaskId?: string): Promise<ReviewR
     const body = unreadable
       ? `Marlowe couldn't get a clean read on the option set (${c.error})`
       : `Marlowe's read (${c.verdict}): ${c.note || (c.issues[0]?.problem ?? 'reviewed')}`;
+    // reviewedSoulVersion = the soul that WROTE the set under review, so verdicts
+    // can be compared across Wren soul edits (soulVersion = Marlowe's own).
+    const reviewedSoulVersion = (spec.soulVersion as string) ?? null;
     const payload = unreadable
-      ? { agent: 'marlowe', error: c.error, soulVersion: soulVersion('marlowe') ?? 'inline' }
-      : { agent: 'marlowe', verdict: c.verdict, score: c.score, issues: c.issues, soulVersion: soulVersion('marlowe') ?? 'inline' };
+      ? { agent: 'marlowe', error: c.error, soulVersion: soulVersion('marlowe') ?? 'inline', reviewedSoulVersion }
+      : { agent: 'marlowe', verdict: c.verdict, score: c.score, issues: c.issues, soulVersion: soulVersion('marlowe') ?? 'inline', reviewedSoulVersion };
     await sql`
       insert into atelier_dossier_entry (workspace_id, dossier_id, task_id, employee_slug, entry_type, body, payload)
       values (${ATELIER_WS}, ${rows[0].dossier_id}, ${rows[0].id}, 'marlowe', 'note',
