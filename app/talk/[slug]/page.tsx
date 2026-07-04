@@ -2,6 +2,7 @@ import '../../dashboard.css';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getAgent, getThread, listAgents } from '@/lib/agents/chat';
+import { markThreadRead, unreadSummary } from '@/lib/inbox';
 import { TalkChat } from './TalkChat';
 
 export const runtime = 'nodejs';
@@ -11,7 +12,8 @@ export default async function TalkPage({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const agent = await getAgent(slug);
   if (!agent) notFound();
-  const [history, team] = await Promise.all([getThread(slug, 'default', 40), listAgents()]);
+  const [history, team, unread] = await Promise.all([getThread(slug, 'default', 40), listAgents(), unreadSummary()]);
+  await markThreadRead(slug); // this thread is now in front of the user
   return (
     <div className="dash">
       <nav className="dash-nav">
@@ -20,11 +22,19 @@ export default async function TalkPage({ params }: { params: Promise<{ slug: str
         <Link href="/">Floor</Link>
         <Link href="/project/launch-course-19">Projects</Link>
         <div className="group">Your team</div>
-        {team.map((a) => (
-          <Link key={a.slug} href={`/talk/${a.slug}`} className={a.slug === slug ? 'active' : ''}>
-            {a.slug === slug ? <span className="dot" /> : null}{a.name}
-          </Link>
-        ))}
+        {team.map((a) => {
+          const u = a.slug === slug ? 0 : (unread.get(a.slug)?.unread ?? 0);
+          return (
+            <Link key={a.slug} href={`/talk/${a.slug}`} className={a.slug === slug ? 'active' : ''}>
+              {a.slug === slug ? <span className="dot" /> : null}{a.name}
+              {u > 0 ? (
+                <span style={{ marginLeft: 'auto', background: 'var(--gold, #c79320)', color: '#1a160c', borderRadius: 9, fontSize: 10.5, fontWeight: 800, padding: '1px 7px' }}>
+                  {u}
+                </span>
+              ) : null}
+            </Link>
+          );
+        })}
       </nav>
       <div className="dash-main" style={{ maxWidth: 760 }}>
         <div className="dash-crumb"><Link href="/" style={{ color: 'var(--muted)' }}>Atelier</Link> › {agent.name}</div>

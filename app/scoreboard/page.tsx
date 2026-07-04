@@ -119,7 +119,7 @@ export default async function ScoreboardPage({
               {active.map((a) => (
                 <tr key={a.slug}>
                   <td style={td}>
-                    <a href={`/talk/${a.slug}`} style={{ color: INK, fontWeight: 700, textDecoration: "none" }}>{a.name}</a>
+                    <a href={`/scoreboard/${a.slug}?days=${days}`} style={{ color: INK, fontWeight: 700, textDecoration: "none", borderBottom: `1px dotted ${INK_SOFT}` }} title="Open the proof log">{a.name}</a>
                   </td>
                   <td style={td}>
                     <PassBar rate={a.proofs.passRate} />

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { agentChat, getThread, getThreadAfter } from '@/lib/agents/chat';
+import { markThreadRead } from '@/lib/inbox';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,6 +19,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ slug: strin
     return NextResponse.json({ error: 'INVALID_AFTER' }, { status: 400 });
   }
   const messages = after ? await getThreadAfter(slug, thread, after) : await getThread(slug, thread, 40);
+  // Only the open chat UI polls this — the user is looking at the thread.
+  try { await markThreadRead(slug, thread); } catch { /* watermark is best-effort */ }
   return NextResponse.json({ messages });
 }
 

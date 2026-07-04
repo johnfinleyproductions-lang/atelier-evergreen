@@ -121,7 +121,8 @@ export async function research(brief: string): Promise<ResearchPlan> {
       // on-demand lane, long on M90t's pinned lane. The long timeout tolerates a
       // one-off cold load; research runs as a background job, so it never blocks a
       // request even when OpenCode's 27b just evicted the model.
-      body: JSON.stringify({ model: VERA_MODEL, stream: false, keep_alive: OLLAMA_KEEPALIVE, options: { temperature: 0.6 },
+      body: JSON.stringify({ model: VERA_MODEL, stream: false, keep_alive: OLLAMA_KEEPALIVE,
+        ...(/qwen3/i.test(VERA_MODEL) ? { think: false } : {}), options: { temperature: 0.6 },
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
       signal: AbortSignal.timeout(140_000),
     });

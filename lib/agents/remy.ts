@@ -57,7 +57,8 @@ export async function videoScript(brief: string): Promise<VideoScript> {
     const user = `Brief: ${brief}\n\n${ctx}\n\nReturn the JSON object.`;
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: REMY_MODEL, stream: false, keep_alive: OLLAMA_KEEPALIVE, options: { temperature: 0.7 },
+      body: JSON.stringify({ model: REMY_MODEL, stream: false, keep_alive: OLLAMA_KEEPALIVE,
+        ...(/qwen3/i.test(REMY_MODEL) ? { think: false } : {}), options: { temperature: 0.7 },
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
       signal: AbortSignal.timeout(140_000),
     });

@@ -256,6 +256,64 @@ export async function getScoreboard(windowDays = 30): Promise<Scoreboard> {
   };
 }
 
+// ── Drill-down: the raw proof rows behind an agent's aggregates ─────────────
+export interface ProofLogRow {
+  id: string;
+  kind: string;
+  status: string;
+  score: number | null;
+  threshold: number | null;
+  deMean: number | null;
+  deMax: number | null;
+  model: string | null;
+  soulVersion: string | null;
+  evidence: string | null; // measured | judged | stub
+  screenshotRef: string | null;
+  taskTitle: string | null;
+  createdAt: string;
+}
+
+export async function getProofLog(slug: string, windowDays = 30, limit = 100): Promise<ProofLogRow[]> {
+  const rows = (await sql`
+    select p.id, p.kind, p.status, p.score, p.threshold, p.created_at,
+           coalesce(
+             (p.detail->'paletteDeltaE'->>'mean')::real,
+             (p.detail#>>'{breakdown,paletteDeltaE,mean}')::real
+           ) as de_mean,
+           coalesce(
+             case when jsonb_typeof(p.detail->'paletteDeltaE') = 'number' then (p.detail->>'paletteDeltaE')::real end,
+             (p.detail->'paletteDeltaE'->>'max')::real,
+             (p.detail#>>'{breakdown,paletteDeltaE,max}')::real
+           ) as de_max,
+           p.detail->>'model' as model,
+           p.detail->>'soulVersion' as soul_version,
+           p.detail->>'evidence' as evidence,
+           coalesce(p.detail->>'screenshotRef', p.detail->>'screenshot_ref') as screenshot_ref,
+           t.title as task_title
+      from atelier_proof p
+      left join atelier_task t on t.id = p.task_id
+     where p.workspace_id = ${ATELIER_WS} and p.employee_slug = ${slug}
+       and p.created_at > now() - make_interval(days => ${windowDays})
+     order by p.created_at desc
+     limit ${limit}
+  `) as unknown as Row[];
+  return rows.map((r) => ({
+    id: r.id as string,
+    kind: r.kind as string,
+    status: r.status as string,
+    score: num(r.score),
+    threshold: num(r.threshold),
+    deMean: num(r.de_mean),
+    deMax: num(r.de_max),
+    model: (r.model as string | null) ?? null,
+    soulVersion: (r.soul_version as string | null) ?? null,
+    evidence: (r.evidence as string | null) ?? null,
+    screenshotRef: (r.screenshot_ref as string | null) ?? null,
+    taskTitle: (r.task_title as string | null) ?? null,
+    createdAt: String(r.created_at),
+  }));
+}
+
 const pct = (x: number | null) => (x == null ? '—' : `${Math.round(x * 100)}%`);
 
 /** Otto-voice text rendering for chat: verdict first, numbers, no judgment of the work. */

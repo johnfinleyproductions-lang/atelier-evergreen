@@ -1,4 +1,5 @@
 import { getFloor } from "@/lib/atelier";
+import { unreadSummary } from "@/lib/inbox";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,7 @@ function fmtWhen(value: unknown): string {
 
 export default async function CleosFloor() {
   const floor = await getFloor();
+  const unread = await unreadSummary();
   const { employees, needsYou, inFlight, blocked, shipped } = floor;
 
   return (
@@ -141,7 +143,9 @@ export default async function CleosFloor() {
             }}
           >
             {employees.map((employee) => (
-              <EmployeeCard key={employee.id} employee={employee} />
+              <EmployeeCard key={employee.id} employee={employee}
+                unread={unread.get(employee.slug)?.unread}
+                snippet={unread.get(employee.slug)?.snippet} />
             ))}
           </div>
         )}
@@ -373,7 +377,7 @@ function Pill({ children }: { children: React.ReactNode }) {
   );
 }
 
-function EmployeeCard({ employee }: { employee: Employee }) {
+function EmployeeCard({ employee, unread, snippet }: { employee: Employee; unread?: number; snippet?: string | null }) {
   const dot = STATUS_COLORS[employee.status] ?? STATUS_COLORS.idle;
   return (
     <a
@@ -397,7 +401,14 @@ function EmployeeCard({ employee }: { employee: Employee }) {
           alignItems: "center",
         }}
       >
-        <span style={{ fontSize: 15.5, fontWeight: 700 }}>{employee.name}</span>
+        <span style={{ fontSize: 15.5, fontWeight: 700 }}>
+          {employee.name}
+          {unread ? (
+            <span style={{ marginLeft: 8, background: GOLD, color: "#1a160c", borderRadius: 9, fontSize: 10.5, fontWeight: 800, padding: "1px 7px", verticalAlign: "middle" }}>
+              {unread} new
+            </span>
+          ) : null}
+        </span>
         <span
           style={{
             display: "inline-flex",
@@ -412,6 +423,11 @@ function EmployeeCard({ employee }: { employee: Employee }) {
           {employee.status}
         </span>
       </div>
+      {unread && snippet ? (
+        <div style={{ fontSize: 12, color: INK_SOFT, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          “{snippet}…”
+        </div>
+      ) : null}
       <div style={{ fontSize: 13.5, color: INK_SOFT }}>{employee.role}</div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2 }}>
         <span

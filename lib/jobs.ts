@@ -131,8 +131,8 @@ const RUNNERS: Record<string, (input: Record<string, unknown>) => Promise<unknow
 const JOB_MODEL: Record<string, string> = {
   hugo_build: process.env.ATELIER_HUGO_MODEL ?? 'qwen2.5-coder:14b',
   vera_research: 'qwen3.5:9b',
-  marlowe_review: 'qwen3.5:9b',
-  marlowe_critique: 'qwen3.5:9b',
+  marlowe_review: process.env.ATELIER_MARLOWE_MODEL ?? 'qwen3.5:9b',
+  marlowe_critique: process.env.ATELIER_MARLOWE_MODEL ?? 'qwen3.5:9b',
   lena_plan: 'qwen3.5:9b',
   remy_script: 'qwen3.5:9b',
 };

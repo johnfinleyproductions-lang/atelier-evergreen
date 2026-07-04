@@ -77,11 +77,14 @@ export async function critique(content: string, label = 'this copy'): Promise<Cr
       `${VOICE}${taste}\n\n` +
       `Return ONLY a JSON object: {"verdict":"ship"|"revise","onBrand":true|false,"score":0..1,` +
       `"issues":[{"problem":"...","fix":"..."}],"note":"one-line overall read"}. ` +
-      `"ship" only if it is genuinely on-voice with no material issues. 2-3 issues max, the ones that matter.`;
+      `Both verdicts are real. Decision rule, applied in order: (1) score the copy 0..1 against the voice; ` +
+      `(2) if score >= 0.8 and no MATERIAL problem exists, verdict = "ship" and "issues" = []; ` +
+      `(3) otherwise verdict = "revise" with the 2-3 material issues. Cosmetic nitpicks never block a ship.`;
     const user = `Critique ${label}:\n\n${content}\n\nReturn the JSON object only.`;
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model: MARLOWE_MODEL, stream: false, keep_alive: OLLAMA_KEEPALIVE,
+        ...(/qwen3/i.test(MARLOWE_MODEL) ? { think: false } : {}),
         options: { temperature: 0.4 },
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
       signal: AbortSignal.timeout(110_000),
