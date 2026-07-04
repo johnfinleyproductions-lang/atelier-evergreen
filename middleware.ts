@@ -1,28 +1,43 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { GATE_SECRET, AUTH_DISABLED, isAuthorized } from '@/lib/gate-auth';
 
-// S1 — lock the control plane. Every /api/* route had zero auth while wired to
-// evergreen-core's PRODUCTION Postgres over 0.0.0.0. This gate requires a shared
-// secret (cookie for the browser, or x-atelier-secret header for CLI/programmatic)
-// on all /api/* except the public health check and the gate itself.
+// S1 — lock the whole app, fail-CLOSED. Every route (pages AND /api/*) requires
+// auth except the gate itself and a trimmed health probe. Pages redirect to
+// /gate; APIs get 401. If ATELIER_API_SECRET is unset the app 503s with
+// instructions rather than silently running open (the old fail-open default
+// meant a missing env var = auth off on a box wired to production Postgres).
+// ATELIER_AUTH_DISABLED=1 is the explicit opt-out.
 //
-// Rollout-safe: if ATELIER_API_SECRET is unset, auth is OFF (fail-open) so a
-// misconfigured deploy can't brick the app; set the env var to turn it ON.
-const SECRET = process.env.ATELIER_API_SECRET ?? '';
+// runtime nodejs: self-hosted `next start` box; also keeps node:crypto usable
+// and avoids the edge compile of instrumentation's job graph.
+
+const PUBLIC_PATHS = new Set(['/gate', '/api/gate', '/api/health']);
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  if (pathname === '/api/health' || pathname === '/api/gate') return NextResponse.next();
+  if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
+  if (AUTH_DISABLED) return NextResponse.next();
 
-  if (!SECRET) return NextResponse.next(); // auth not configured → allow
+  const isApi = pathname.startsWith('/api');
+  if (!GATE_SECRET) {
+    const hint = 'Gate not configured: set ATELIER_API_SECRET in the environment (or ATELIER_AUTH_DISABLED=1 to explicitly run open).';
+    return isApi
+      ? NextResponse.json({ error: 'GATE_NOT_CONFIGURED', hint }, { status: 503 })
+      : new NextResponse(hint, { status: 503, headers: { 'content-type': 'text/plain' } });
+  }
 
-  const provided = req.cookies.get('atelier_auth')?.value ?? req.headers.get('x-atelier-secret') ?? '';
-  if (provided === SECRET) return NextResponse.next();
+  if (isAuthorized(req)) return NextResponse.next();
 
-  return NextResponse.json({ error: 'UNAUTHORIZED', hint: 'gate in at /gate or send x-atelier-secret' }, { status: 401 });
+  if (isApi) {
+    return NextResponse.json({ error: 'UNAUTHORIZED', hint: 'gate in at /gate or send x-atelier-secret' }, { status: 401 });
+  }
+  const gate = req.nextUrl.clone();
+  gate.pathname = '/gate';
+  gate.search = `next=${encodeURIComponent(pathname + (req.nextUrl.search || ''))}`;
+  return NextResponse.redirect(gate);
 }
 
-// runtime: 'nodejs' — this is a self-hosted `next start` box, and edge middleware
-// forces an edge compile of instrumentation.ts whose graph (jobs → lanes/hugo →
-// postgres/sharp/playwright) can't bundle for edge. Node middleware avoids that
-// entire compile. Requires experimental.nodeMiddleware in next.config.ts.
-export const config = { matcher: ['/api/:path*'], runtime: 'nodejs' };
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon\\.ico).*)'],
+  runtime: 'nodejs',
+};

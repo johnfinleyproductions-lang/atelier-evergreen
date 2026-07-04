@@ -13,7 +13,10 @@ export default function GatePage() {
     setBusy(true); setErr(null);
     try {
       const r = await fetch('/api/gate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ secret }) });
-      if (r.ok) { window.location.href = '/'; }
+      if (r.ok) {
+        const next = new URLSearchParams(window.location.search).get('next');
+        window.location.href = next && next.startsWith('/') && !next.startsWith('//') ? next : '/';
+      }
       else { setErr('Wrong secret.'); }
     } catch { setErr('Request failed.'); }
     finally { setBusy(false); }

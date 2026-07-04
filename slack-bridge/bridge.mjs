@@ -25,7 +25,13 @@ async function handle(text, say) {
   if (!msg) { await say('What do you need? (e.g. "wren: 6 headlines for course 19")'); return; }
   try {
     const r = await fetch(`${ATELIER}/api/chat/${slug}`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        // Atelier's gate is fail-closed; the bridge authenticates with the raw
+        // secret header (set ATELIER_API_SECRET in the bridge's environment).
+        'x-atelier-secret': process.env.ATELIER_API_SECRET ?? '',
+      },
       body: JSON.stringify({ message: msg, thread: 'slack' }),
     });
     const j = await r.json();
