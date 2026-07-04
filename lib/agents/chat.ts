@@ -23,7 +23,7 @@ import { enqueueHugoBuild } from '../jobs';
 import { getStyleCard, getDefaultBrandRubric } from '../style-repo';
 import { resolveSpec } from '../merge-ledger';
 import { systemHealth, formatHealth } from './otto';
-import { soulPersona } from '../souls';
+import { soulPersona, soulVersion } from '../souls';
 import { getLanesState, currentZone, formatLanes, kickIdle } from '../lanes';
 import { enqueueVeraResearch, enqueueMarloweReview, enqueueLenaPlan, enqueueRemyScript, enqueueMarloweCritique } from '../jobs';
 import { recall, formatRecall } from './dewey';
@@ -421,7 +421,8 @@ export async function agentChat(slug: string, message: string, thread = 'default
     const j = (await res.json()) as { message?: { content?: string } };
     const reply = (j.message?.content ?? '').trim();
     if (!reply) return { ok: false, reply: '', model: CHAT_MODEL, latencyMs: Date.now() - t0, usedTaste: !!taste, error: 'EMPTY_REPLY' };
-    await save(slug, thread, 'assistant', reply);
+    const sv = soulVersion(slug);
+    await save(slug, thread, 'assistant', reply, sv ? { soulVersion: sv } : undefined);
     return { ok: true, reply, model: CHAT_MODEL, latencyMs: Date.now() - t0, usedTaste: !!taste };
   } catch (err) {
     return { ok: false, reply: '', model: CHAT_MODEL, latencyMs: Date.now() - t0, usedTaste: false, error: err instanceof Error ? err.message : 'OLLAMA_UNREACHABLE' };

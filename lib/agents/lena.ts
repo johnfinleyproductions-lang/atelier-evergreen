@@ -8,6 +8,7 @@
 // the project so it shows in the log and Dewey can recall it.
 
 import { projectContext, logToProject } from './context';
+import { soulTaskPersona, soulVersion } from '../souls';
 
 import { OLLAMA_KEEPALIVE } from '../ollama';
 const OLLAMA_URL = process.env.ATELIER_OLLAMA_URL ?? 'http://192.168.4.176:11434';
@@ -50,8 +51,9 @@ export async function distributionPlan(brief: string): Promise<DistributionPlan>
   const base: DistributionPlan = { brief, audience: '', channels: [], sequence: [], cta: '', model: LENA_MODEL, latencyMs: 0 };
   try {
     const ctx = await projectContext();
+    const persona = soulTaskPersona('lena') ?? 'You are Lena, a curriculum & distribution lead.';
     const system =
-      `You are Lena, a curriculum & distribution lead. Given a brief and project context, return ONLY a JSON ` +
+      `${persona}\n\n## Task output contract\nGiven a brief and project context, return ONLY a JSON ` +
       `object: {"audience":"who this is for, specific","channels":[{"name":"channel","angle":"the hook for that ` +
       `channel","format":"the asset type"}],"sequence":["ordered launch steps"],"cta":"the single primary call to action"}. ` +
       `3-5 channels, each with a DIFFERENT angle suited to that channel. Be concrete and outcome-focused — no generic ` +
@@ -77,7 +79,7 @@ export async function planAndLog(brief: string): Promise<DistributionPlan & { lo
   let logged = false;
   if (p.channels.length) {
     logged = await logToProject('lena', `Distribution plan — ${brief}: ${p.channels.map((c) => c.name).join(', ')}`,
-      { agent: 'lena', audience: p.audience, channels: p.channels, sequence: p.sequence, cta: p.cta });
+      { agent: 'lena', audience: p.audience, channels: p.channels, sequence: p.sequence, cta: p.cta, soulVersion: soulVersion('lena') ?? 'inline' });
   }
   return { ...p, logged };
 }

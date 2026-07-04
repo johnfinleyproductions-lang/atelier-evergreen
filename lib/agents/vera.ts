@@ -12,6 +12,7 @@
 
 import { sql } from '../db';
 import { ATELIER_WS } from '../atelier';
+import { soulTaskPersona, soulVersion } from '../souls';
 
 import { OLLAMA_KEEPALIVE } from '../ollama';
 const OLLAMA_URL = process.env.ATELIER_OLLAMA_URL ?? 'http://192.168.4.176:11434';
@@ -106,8 +107,9 @@ export async function research(brief: string): Promise<ResearchPlan> {
     const srcBlock = sources.length
       ? `\nIndexed sources you may lean on (cite by source):\n${sources.map((s, i) => `[${i + 1}] ${s.text}`).join('\n')}`
       : '';
+    const persona = soulTaskPersona('vera') ?? 'You are Vera, a sharp researcher.';
     const system =
-      `You are Vera, a sharp researcher. Given a brief and project context, return ONLY a JSON object ` +
+      `${persona}\n\n## Task output contract\nGiven a brief and project context, return ONLY a JSON object ` +
       `with three string arrays: "angles" (3-5 distinct angles worth investigating, each a short phrase), ` +
       `"questions" (3-5 specific questions to answer), and "verify" (2-4 things to fact-check before relying on them). ` +
       `Be concrete and non-generic. No prose, no markdown — just the JSON object.`;
@@ -152,7 +154,7 @@ export async function researchAndLog(brief: string): Promise<ResearchPlan & { lo
         insert into atelier_dossier_entry (workspace_id, dossier_id, employee_slug, entry_type, body, payload)
         values (${ATELIER_WS}, ${d[0].id}, 'vera', 'note',
                 ${`Research plan — ${brief}: ${p.angles.slice(0, 3).join('; ')}`},
-                ${sql.json({ agent: 'vera', angles: p.angles, questions: p.questions, verify: p.verify, grounded: p.grounded } as never)})`;
+                ${sql.json({ agent: 'vera', angles: p.angles, questions: p.questions, verify: p.verify, grounded: p.grounded, soulVersion: soulVersion('vera') ?? 'inline' } as never)})`;
       logged = true;
     }
   }

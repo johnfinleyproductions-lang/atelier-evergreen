@@ -13,6 +13,7 @@
 import { sql } from '../db';
 import { ATELIER_WS } from '../atelier';
 import { recallTasteForPrompt } from '../taste-memory';
+import { soulTaskPersona, soulVersion } from '../souls';
 
 import { OLLAMA_KEEPALIVE } from '../ollama';
 const OLLAMA_URL = process.env.ATELIER_OLLAMA_URL ?? 'http://192.168.4.176:11434';
@@ -69,8 +70,9 @@ export async function critique(content: string, label = 'this copy'): Promise<Cr
   const base: Critique = { verdict: 'revise', onBrand: false, score: 0, issues: [], note: '', model: MARLOWE_MODEL, latencyMs: 0 };
   try {
     const taste = await recallTasteForPrompt('wren_option');
+    const persona = soulTaskPersona('marlowe') ?? 'You are Marlowe, an exacting brand editor.';
     const system =
-      `You are Marlowe, an exacting brand editor. Critique the supplied copy against the brand voice. ` +
+      `${persona}\n\n## Task\nCritique the supplied copy against the brand voice. ` +
       `Be honest and specific — name concrete problems and concrete fixes, never vague praise. ` +
       `${VOICE}${taste}\n\n` +
       `Return ONLY a JSON object: {"verdict":"ship"|"revise","onBrand":true|false,"score":0..1,` +
@@ -122,8 +124,8 @@ export async function reviewLatestWren(decisionTaskId?: string): Promise<ReviewR
       ? `Marlowe couldn't get a clean read on the option set (${c.error})`
       : `Marlowe's read (${c.verdict}): ${c.note || (c.issues[0]?.problem ?? 'reviewed')}`;
     const payload = unreadable
-      ? { agent: 'marlowe', error: c.error }
-      : { agent: 'marlowe', verdict: c.verdict, score: c.score, issues: c.issues };
+      ? { agent: 'marlowe', error: c.error, soulVersion: soulVersion('marlowe') ?? 'inline' }
+      : { agent: 'marlowe', verdict: c.verdict, score: c.score, issues: c.issues, soulVersion: soulVersion('marlowe') ?? 'inline' };
     await sql`
       insert into atelier_dossier_entry (workspace_id, dossier_id, task_id, employee_slug, entry_type, body, payload)
       values (${ATELIER_WS}, ${rows[0].dossier_id}, ${rows[0].id}, 'marlowe', 'note',

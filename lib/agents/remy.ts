@@ -8,6 +8,7 @@
 
 import { projectContext, logToProject } from './context';
 import { createTask, moveTask, attachProof } from '../atelier';
+import { soulTaskPersona, soulVersion } from '../souls';
 
 import { OLLAMA_KEEPALIVE } from '../ollama';
 const OLLAMA_URL = process.env.ATELIER_OLLAMA_URL ?? 'http://192.168.4.176:11434';
@@ -47,8 +48,9 @@ export async function videoScript(brief: string): Promise<VideoScript> {
   const base: VideoScript = { brief, hook: '', beats: [], cta: '', model: REMY_MODEL, latencyMs: 0 };
   try {
     const ctx = await projectContext();
+    const persona = soulTaskPersona('remy') ?? 'You are Remy, a media producer.';
     const system =
-      `You are Remy, a media producer. Given a brief and project context, return ONLY a JSON object for a tight ` +
+      `${persona}\n\n## Task output contract\nGiven a brief and project context, return ONLY a JSON object for a tight ` +
       `30-60s short-form video: {"hook":"the first-3-seconds line that stops the scroll","beats":[{"onScreen":"what ` +
       `the viewer sees","vo":"the voiceover line"}],"cta":"closing call to action"}. 3-5 beats, concrete and ` +
       `shoot-ready (real shots, not "show footage"). Energetic, no fluff. No prose, just the JSON object.`;
@@ -110,7 +112,7 @@ export async function scriptAndLog(brief: string): Promise<VideoScript & { logge
       await attachProof({
         taskId: task.id, employeeSlug: 'remy', kind: 'script_shape',
         status: gate.status, score: gate.score, threshold: 1,
-        detail: { ...gate.detail, hook: sc.hook.slice(0, 120) },
+        detail: { ...gate.detail, hook: sc.hook.slice(0, 120), model: sc.model, soulVersion: soulVersion('remy') ?? 'inline' },
       });
     } catch { /* never lose a script over proof bookkeeping */ }
   }

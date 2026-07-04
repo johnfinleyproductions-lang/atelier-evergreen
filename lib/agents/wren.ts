@@ -10,12 +10,21 @@
 const OLLAMA_URL = process.env.ATELIER_OLLAMA_URL ?? 'http://192.168.4.176:11434';
 const WREN_MODEL = process.env.ATELIER_WREN_MODEL ?? 'qwen3.5:9b';
 
+// Fallback persona when no soul file exists; with a soul, the identity comes
+// from souls/runtime/wren.md (soulTaskPersona) and only the contract is fixed.
 const SYSTEM = `You are Wren, a senior direct-response copywriter for Evergreen.
 Voice: clear, confident, benefit-led, no hype, no clichés, no emoji. You write
 for a creator's audience who values substance. Given a brief, produce sharp,
 varied headline options — each a different angle (outcome, curiosity, contrarian,
 specificity, identity). Keep each under 9 words. Return ONLY a JSON array of
 strings, nothing else.`;
+
+const CONTRACT = `
+
+## Task output contract
+Given a brief, produce sharp, varied headline options — each a DIFFERENT angle
+(outcome, curiosity, contrarian, specificity, identity). Keep each under 9 words.
+Return ONLY a JSON array of strings, nothing else.`;
 
 export interface WrenResult {
   ok: boolean;
@@ -51,15 +60,18 @@ function parseHeadlines(raw: string, want: number): string[] {
 export async function generateHeadlines(brief: string, count = 6, tasteContext = ''): Promise<WrenResult> {
   const t0 = Date.now();
   try {
+    const soul = soulTaskPersona('wren');
+    const system = (soul ? soul + CONTRACT : SYSTEM) + tasteContext;
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         model: WREN_MODEL,
         stream: false,
+        ...(/qwen3/i.test(WREN_MODEL) ? { think: false } : {}),
         options: { temperature: 0.8 },
         messages: [
-          { role: 'system', content: SYSTEM + tasteContext },
+          { role: 'system', content: system },
           { role: 'user', content: `Brief: ${brief}\n\nWrite ${count} headline options. JSON array of strings only.` },
         ],
       }),
@@ -91,6 +103,7 @@ export async function generateHeadlines(brief: string, count = 6, tasteContext =
 import { sql } from '../db';
 import { ATELIER_WS, attachProof, moveTask } from '../atelier';
 import { recallTasteForPrompt } from '../taste-memory';
+import { soulTaskPersona, soulVersion } from '../souls';
 
 // ── The deterministic gate on an option set — Wren's proof, in her own currency.
 // Machine-checkable per her rules: enough genuinely distinct options, zero
@@ -167,7 +180,7 @@ export async function wrenWriteHeadlines(slug: string): Promise<WrenRunResult> {
     status: gate.status,
     score: gate.score,
     threshold: 0.5,
-    detail: gate.detail,
+    detail: { ...gate.detail, model: gen.model, soulVersion: soulVersion('wren') ?? 'inline' },
   });
   if (gate.status === 'pass') {
     await moveTask(tRows[0].id as string, 'review'); // proofed → review, gate satisfied

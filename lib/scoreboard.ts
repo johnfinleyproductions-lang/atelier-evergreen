@@ -39,10 +39,21 @@ export interface ModelScore {
   avgDeltaE: number | null;
 }
 
+/** Per (agent, soul-content-hash) outcomes — the soul-edit A/B the board exists for. */
+export interface SoulVersionScore {
+  slug: string;
+  name: string;
+  soulVersion: string; // 8-hex content hash, or 'inline' for pre-soul prompts
+  n: number;
+  passRate: number;
+  avgScore: number | null;
+}
+
 export interface Scoreboard {
   windowDays: number;
   agents: AgentScore[];
   models: ModelScore[]; // proofs that recorded which model produced them (Hugo's tiers)
+  soulVersions: SoulVersionScore[]; // proofs that recorded which soul produced them
   wrenReviews: { ship: number; revise: number }; // Marlowe verdicts in the window
   totals: { proofs: number; pass: number; passRate: number | null };
 }
@@ -143,6 +154,22 @@ export async function getScoreboard(windowDays = 30): Promise<Scoreboard> {
      order by count(*) desc
   `) as unknown as Row[];
 
+  // Per (agent, soul version) outcomes — proofs stamped with the content hash
+  // of the soul that produced them. This is the A/B the scoreboard exists for:
+  // edit a soul, and its hash gets its own row against the old one.
+  const soulAgg = (await sql`
+    select employee_slug, detail->>'soulVersion' as soul_version,
+           count(*)::int                                as n,
+           count(*) filter (where status = 'pass')::int as pass,
+           avg(score)                                   as avg_score
+      from atelier_proof
+     where workspace_id = ${ATELIER_WS} and employee_slug is not null
+       and detail->>'soulVersion' is not null
+       and created_at > now() - make_interval(days => ${windowDays})
+     group by employee_slug, detail->>'soulVersion'
+     order by employee_slug, count(*) desc
+  `) as unknown as Row[];
+
   // Marlowe's logged verdicts — option-set reviews AND copy critiques.
   // LLM-judged, kept out of the measured pass rates above by design.
   const verdictAgg = (await sql`
@@ -209,10 +236,21 @@ export async function getScoreboard(windowDays = 30): Promise<Scoreboard> {
   const totalProofs = agents.reduce((a, x) => a + x.proofs.total, 0);
   const totalPass = agents.reduce((a, x) => a + x.proofs.pass, 0);
 
+  const empName = new Map(employees.map((e) => [e.slug, e.name]));
+  const soulVersions: SoulVersionScore[] = soulAgg.map((s) => ({
+    slug: s.employee_slug as string,
+    name: empName.get(s.employee_slug as string) ?? (s.employee_slug as string),
+    soulVersion: s.soul_version as string,
+    n: s.n as number,
+    passRate: rate(s.pass as number, s.n as number) ?? 0,
+    avgScore: num(s.avg_score),
+  }));
+
   return {
     windowDays,
     agents,
     models,
+    soulVersions,
     wrenReviews: { ship: verdicts.get('ship') ?? 0, revise: verdicts.get('revise') ?? 0 },
     totals: { proofs: totalProofs, pass: totalPass, passRate: rate(totalPass, totalProofs) },
   };
@@ -260,6 +298,12 @@ export function formatScoreboard(sb: Scoreboard): string {
     out.push('By model (proofs that recorded one):');
     for (const m of sb.models) {
       out.push(`  ${m.model}: ${pct(m.passRate)} pass over ${m.n}${m.avgScore != null ? `, avg score ${m.avgScore.toFixed(2)}` : ''}${m.avgDeltaE != null ? `, ΔE mean ${m.avgDeltaE.toFixed(1)}` : ''}`);
+    }
+  }
+  if (sb.soulVersions.length) {
+    out.push('By soul version (edit a soul → its hash gets its own row):');
+    for (const s of sb.soulVersions) {
+      out.push(`  ${s.name} @${s.soulVersion}: ${pct(s.passRate)} pass over ${s.n}${s.avgScore != null ? `, avg score ${s.avgScore.toFixed(2)}` : ''}`);
     }
   }
   return out.join('\n');

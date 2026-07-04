@@ -171,6 +171,42 @@ export default async function ScoreboardPage({
         ) : null}
       </section>
 
+      {/* ---------------- per-soul-version table ---------------- */}
+      <section style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, overflow: "hidden", marginBottom: 28 }}>
+        <div style={{ padding: "14px 16px 0", fontSize: 12, letterSpacing: "0.18em", textTransform: "uppercase", color: INK_SOFT, fontWeight: 700 }}>
+          By soul version — edit a soul, its hash gets its own row
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+            <thead>
+              <tr>
+                <th style={th}>Agent</th>
+                <th style={th}>Soul</th>
+                <th style={th}>Proofs</th>
+                <th style={th}>Pass rate</th>
+                <th style={th}>Avg score</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sb.soulVersions.map((s) => (
+                <tr key={`${s.slug}-${s.soulVersion}`}>
+                  <td style={{ ...td, fontWeight: 700 }}>{s.name}</td>
+                  <td style={{ ...td, fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>
+                    {s.soulVersion === "inline" ? <span style={{ color: INK_SOFT }}>inline (pre-soul)</span> : `@${s.soulVersion}`}
+                  </td>
+                  <td style={td}>{s.n}</td>
+                  <td style={td}><PassBar rate={s.passRate} /></td>
+                  <td style={td}>{s.avgScore != null ? s.avgScore.toFixed(2) : "—"}</td>
+                </tr>
+              ))}
+              {!sb.soulVersions.length ? (
+                <tr><td style={{ ...td, color: INK_SOFT }} colSpan={5}>No soul-stamped proofs in this window yet — they start with the next job each agent runs.</td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       {/* ---------------- per-model table ---------------- */}
       <section style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, overflow: "hidden" }}>
         <div style={{ padding: "14px 16px 0", fontSize: 12, letterSpacing: "0.18em", textTransform: "uppercase", color: INK_SOFT, fontWeight: 700 }}>

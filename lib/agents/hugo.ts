@@ -11,6 +11,7 @@
 
 import { sql } from '../db';
 import { ATELIER_WS, createTask, attachProof, moveTask } from '../atelier';
+import { soulTaskPersona, soulVersion } from '../souls';
 import { getStyleCard, getDefaultBrandRubric } from '../style-repo';
 import { resolveSpec } from '../merge-ledger';
 import { renderAndScore } from '../visual-qa';
@@ -107,9 +108,14 @@ export async function hugoBuild(slug: string, brief: string, styleHandle = '@war
       colors = { teal: c.teal ?? colors.teal, gold: c.gold ?? colors.gold, page: c.page ?? colors.page, ink: c.ink ?? colors.ink };
     }
 
-    // Hugo writes the code (a real coder model).
-    const system =
-      `You are Hugo, a senior front-end engineer. You write clean, semantic, single-file HTML with inline styles only — no external resources, no JavaScript, no frameworks, no markdown commentary. You follow brand specs EXACTLY.`;
+    // Hugo writes the code (a real coder model). His soul carries the identity;
+    // the contract carries the absolutes the render gate will measure.
+    const soul = soulTaskPersona('hugo');
+    const contract =
+      `You write clean, semantic, single-file HTML with inline styles only — no external resources, no JavaScript, no frameworks, no markdown commentary. You follow brand specs EXACTLY. Output ONLY the HTML document.`;
+    const system = soul
+      ? `${soul}\n\n## Task output contract\n${contract}`
+      : `You are Hugo, a senior front-end engineer. ${contract}`;
     const user =
       `Build a complete single-file HTML landing card for: "${brief}".\n` +
       `Use ONLY these exact colors:\n` +
@@ -137,7 +143,7 @@ export async function hugoBuild(slug: string, brief: string, styleHandle = '@war
       status: qc.pass ? 'pass' : 'fail',
       score: qc.matchScore,
       threshold: 0.6,
-      detail: { agent: 'hugo', model, evidence: 'measured', paletteDeltaE: qc.breakdown.paletteDeltaE ?? null, screenshotRef: qc.screenshotRef, htmlBytes: html.length },
+      detail: { agent: 'hugo', model, soulVersion: soulVersion('hugo') ?? 'inline', evidence: 'measured', paletteDeltaE: qc.breakdown.paletteDeltaE ?? null, screenshotRef: qc.screenshotRef, htmlBytes: html.length },
     });
 
     let reachedReview = false;
