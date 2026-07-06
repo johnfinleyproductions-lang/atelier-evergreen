@@ -9,7 +9,13 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
   if (process.env.ATELIER_DISABLE_TICKER === '1') return;
   const { runDueDeferredJobs } = await import('./lib/jobs');
-  const tick = () => { runDueDeferredJobs().catch(() => { /* best-effort */ }); };
+  const { runAgentSweeps } = await import('./lib/agents/sweeps');
+  const tick = () => {
+    runDueDeferredJobs().catch(() => { /* best-effort */ });
+    // Responsive fulfillment sweeps (Otto's watcher, Cleo's morning brief) —
+    // deterministic pre-checks only; no model ever wakes on an idle tick.
+    runAgentSweeps().catch(() => { /* best-effort */ });
+  };
   setTimeout(tick, 10_000);      // first sweep shortly after boot
   setInterval(tick, 60_000);     // then every minute
 }

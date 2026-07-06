@@ -201,6 +201,13 @@ const TOOLS: Record<string, Tool> = {
   // order (most-specific matchers first, Wren's broad one last) and hands the
   // work to the first that takes it, recording the exchange on their thread.
   cleo: async (m) => {
+    // "brief" → the morning brief on demand (same deterministic composer the
+    // 7am ticker uses; no model involved).
+    if (/^(brief|morning brief|morning)\b/i.test(m)) {
+      const { composeBrief } = await import('./sweeps');
+      const brief = await composeBrief();
+      return brief ?? 'Nothing to brief — no decisions waiting, nothing blocked, no overnight activity. The floor is quiet, which is the good kind of nothing.';
+    }
     const ROUTE_ORDER = ['hugo', 'vera', 'lena', 'remy', 'marlowe', 'iris', 'piper', 'dewey', 'otto', 'wren'];
     for (const s of ROUTE_ORDER) {
       const r = await TOOLS[s](m);
