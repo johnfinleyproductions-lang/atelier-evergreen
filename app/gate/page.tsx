@@ -27,6 +27,10 @@ export default function GatePage() {
       <form onSubmit={submit} style={{ width: 340, padding: 28, borderRadius: 14, background: 'white', boxShadow: '0 8px 30px rgba(0,0,0,.08)' }}>
         <h1 style={{ margin: '0 0 4px', fontSize: 20 }}>Atelier</h1>
         <p style={{ margin: '0 0 16px', fontSize: 13, color: '#5b6b63' }}>Enter the studio secret to continue.</p>
+        <p style={{ margin: '0 0 16px', fontSize: 12, color: '#8a958e', background: '#f5f3ec', borderRadius: 8, padding: '8px 10px', lineHeight: 1.5 }}>
+          Where it lives: <code style={{ fontSize: 11 }}>.env.local</code> in the atelier repo on the Mac.
+          Terminal: <code style={{ fontSize: 11 }}>grep ATELIER_API_SECRET ~/atelier-evergreen/.env.local</code>
+        </p>
         <input
           type="password" value={secret} autoFocus onChange={(e) => setSecret(e.target.value)}
           placeholder="secret"
