@@ -20,7 +20,7 @@ import { ATELIER_WS } from '../atelier';
 
 /** A concrete, executable follow-up the user can accept with a plain "yes". */
 export interface NextStep {
-  kind: 'hugo_build' | 'marlowe_critique' | 'wren_headlines' | 'wren_rerun' | 'remy_script';
+  kind: 'hugo_build' | 'marlowe_critique' | 'wren_headlines' | 'wren_rerun' | 'remy_script' | 'support_send';
   [k: string]: unknown;
 }
 
@@ -137,6 +137,32 @@ export function jobCompletionMessage(kind: string, result: unknown): CompletionM
         return { text: `Script's on the project log — hook: "${r.hook}", ${r.beats.length} beats — but it didn't clear my four-check gate${r.estSeconds ? ` (reads ~${r.estSeconds}s)` : ''}. I'd rework it before it goes anywhere; say "script …" again with a sharper angle.` };
       }
       return { text: `Script's on the project log — hook: "${r.hook}", ${r.beats.length} beats, one CTA${r.gatePassed ? `, cleared the four-check gate${r.estSeconds ? ` at ~${r.estSeconds}s` : ''}` : ''}. Next stop is the Resolve pipeline when you're ready.` };
+    }
+    case 'support_draft': {
+      const r = result as {
+        ok: boolean; reply: string; matched: boolean; confidence: string; taskId: string | null;
+        inbound: { from: string; subject: string; body: string }; error?: string;
+      };
+      if (!r.ok) {
+        return { text: `Couldn't draft a reply to "${r.inbound?.subject ?? 'that email'}" (${r.error ?? 'model error'}). It stays in the queue — resend it with "inbound: …" when you want another pass.` };
+      }
+      const header = r.matched
+        ? `Playbook match · confidence ${r.confidence}.`
+        : `[NO PLAYBOOK MATCH] — this is a holding reply, not an answer. I don't invent policy.`;
+      return {
+        text:
+          `📮 From: ${r.inbound.from}\nSubject: ${r.inbound.subject}\n> ${r.inbound.body.replace(/\s+/g, ' ').slice(0, 160)}\n\n` +
+          `DRAFT — say "yes" to send, "reply: <your exact words>" to send your own (verbatim, I never touch it), or "no" to park.\n\n` +
+          `${r.reply}\n\n---\n${header}`,
+        nextStep: {
+          kind: 'support_send',
+          taskId: r.taskId,
+          to: r.inbound.from,
+          subject: /^re:/i.test(r.inbound.subject) ? r.inbound.subject : `Re: ${r.inbound.subject}`,
+          body: r.reply,
+          question: `${r.inbound.subject} — ${r.inbound.body.slice(0, 200)}`,
+        },
+      };
     }
     default:
       return null; // unknown kind → stay silent rather than speak out of character

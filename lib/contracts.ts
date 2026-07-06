@@ -34,6 +34,8 @@ export const PROOF_KINDS = [
   'lint',
   'option_set',   // Wren: deterministic option-set gate (count/distinct/banned-words/9-word cap)
   'script_shape', // Remy: deterministic script gate (shot+VO parity, hook, one CTA, runtime)
+  'playbook_match', // Piper: did the deterministic keyword pre-match find grounding entries
+  'send_gate',      // Piper: the sandbox/allowlist send gate verdict (the leak ledger)
 ] as const;
 export const ProofKindSchema = z.enum(PROOF_KINDS);
 export type ProofKind = z.infer<typeof ProofKindSchema>;

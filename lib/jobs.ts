@@ -125,6 +125,35 @@ const RUNNERS: Record<string, (input: Record<string, unknown>) => Promise<unknow
   },
   lena_plan: async (input) => planAndLog((input.brief as string) || ''),
   remy_script: async (input) => scriptAndLog((input.brief as string) || ''),
+  // Piper: draft a support reply grounded in the playbook. Creates a support
+  // task with a measured playbook_match proof; the SEND happens only later,
+  // through the human gate (handoff acceptance in Piper's thread).
+  support_draft: async (input) => {
+    const { draftReply } = await import('./support');
+    const { createTask, moveTask, attachProof } = await import('./atelier');
+    const { soulVersion } = await import('./souls');
+    const inbound = {
+      from: String(input.from ?? ''),
+      subject: String(input.subject ?? '(no subject)'),
+      body: String(input.body ?? ''),
+    };
+    const d = await draftReply(inbound);
+    let taskId: string | null = null;
+    if (d.ok) {
+      try {
+        const task = await createTask({ title: `Support: ${inbound.subject}`.slice(0, 80), intent: inbound.body.slice(0, 300), kind: 'support', assigneeSlug: 'piper' });
+        await moveTask(task.id, 'scoped');
+        await moveTask(task.id, 'active');
+        await attachProof({
+          taskId: task.id, employeeSlug: 'piper', kind: 'playbook_match',
+          status: d.matched ? 'pass' : 'fail', score: d.matched ? 1 : 0, threshold: 1,
+          detail: { evidence: 'measured', matched: d.matched, confidence: d.confidence, model: d.model, soulVersion: soulVersion('piper') ?? 'inline', from: inbound.from, subject: inbound.subject },
+        });
+        taskId = task.id;
+      } catch { /* proof bookkeeping never loses a draft */ }
+    }
+    return { ...d, inbound, taskId };
+  },
 };
 
 // Which model each job kind loads — so we can free the lane for it first.
@@ -133,6 +162,7 @@ const JOB_MODEL: Record<string, string> = {
   vera_research: 'qwen3.5:9b',
   marlowe_review: process.env.ATELIER_MARLOWE_MODEL ?? 'qwen3.5:9b',
   marlowe_critique: process.env.ATELIER_MARLOWE_MODEL ?? 'qwen3.5:9b',
+  support_draft: process.env.ATELIER_SUPPORT_MODEL ?? 'qwen3.5:9b',
   lena_plan: 'qwen3.5:9b',
   remy_script: 'qwen3.5:9b',
 };
@@ -317,6 +347,10 @@ export async function enqueueMarloweReview(taskId?: string): Promise<string> {
 
 export async function enqueueMarloweCritique(content: string, subject: string): Promise<string> {
   return enqueueJob('marlowe_critique', { content, subject }, 'marlowe');
+}
+
+export async function enqueueSupportDraft(from: string, subject: string, body: string): Promise<string> {
+  return enqueueJob('support_draft', { from, subject, body }, 'piper');
 }
 
 export async function enqueueLenaPlan(brief: string): Promise<string> {

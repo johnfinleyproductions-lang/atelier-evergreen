@@ -25,7 +25,7 @@ import { resolveSpec } from '../merge-ledger';
 import { systemHealth, formatHealth } from './otto';
 import { soulPersona, soulVersion } from '../souls';
 import { getLanesState, currentZone, formatLanes, kickIdle } from '../lanes';
-import { enqueueVeraResearch, enqueueMarloweReview, enqueueLenaPlan, enqueueRemyScript, enqueueMarloweCritique } from '../jobs';
+import { enqueueVeraResearch, enqueueMarloweReview, enqueueLenaPlan, enqueueRemyScript, enqueueMarloweCritique, enqueueSupportDraft } from '../jobs';
 import { recall, formatRecall } from './dewey';
 import { critique, formatCritique } from './marlowe';
 import { OLLAMA_KEEPALIVE } from '../ollama';
@@ -36,6 +36,7 @@ const PUBLIC_URL = process.env.ATELIER_PUBLIC_URL ?? 'http://192.168.4.200:3040'
 const AGENT_NAMES: Record<string, string> = {
   cleo: 'Cleo', wren: 'Wren', iris: 'Iris', hugo: 'Hugo', vera: 'Vera',
   lena: 'Lena', remy: 'Remy', marlowe: 'Marlowe', dewey: 'Dewey', otto: 'Otto',
+  piper: 'Piper',
 };
 
 export interface ToolReply { text: string; nextStep?: NextStep }
@@ -176,11 +177,31 @@ const TOOLS: Record<string, Tool> = {
     return `On it — drafting a short-form video script for “${brief}” (hook, beats, CTA). I'll post it to the project log and report back here. · job ${jobId.slice(0, 8)}`;
   },
 
+  // Piper: the support desk. "inbound: <pasted email>" → background draft job;
+  // the draft lands in this thread with an executable send handoff ("yes" /
+  // "reply: <verbatim>" / "no"). Also answers "playbook" with coverage stats.
+  piper: async (m) => {
+    if (/^playbook\b/i.test(m)) {
+      const { seedPlaybook, SUPPORT_SANDBOX, TEST_INBOX } = await import('../support');
+      const seed = seedPlaybook();
+      return `Playbook: ${seed.length} seed entries (support/playbook.md) + learned entries from approved sends. ` +
+        `Mode: ${SUPPORT_SANDBOX ? `SANDBOX — every send is rewritten to ${TEST_INBOX || '(no test inbox set!)'}` : 'LIVE — sends go to real customers, still only on your yes'}.`;
+    }
+    if (!/^(inbound|support)\b/i.test(m)) return null;
+    const raw = m.replace(/^(inbound|support)\b[:\s]*/i, '').trim();
+    if (raw.length < 10) return `Paste the email — e.g. "inbound: from: kim@x.com / subject: refund / <the body>".`;
+    const from = raw.match(/from:\s*([^\n/]+)/i)?.[1]?.trim() ?? raw.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)?.[0] ?? 'unknown@unknown';
+    const subject = raw.match(/subject:\s*([^\n/]+)/i)?.[1]?.trim() ?? '(no subject)';
+    const body = raw.replace(/from:\s*[^\n/]+/i, '').replace(/subject:\s*[^\n/]+/i, '').replace(/^[/\s]+/, '').trim() || raw;
+    const jobId = await enqueueSupportDraft(from, subject, body);
+    return `On it — drafting a reply to "${subject}" from the playbook. The draft lands here with a send gate; nothing goes out without your yes. · job ${jobId.slice(0, 8)}`;
+  },
+
   // Cleo: the router. She makes nothing — she probes the specialists' tools in
   // order (most-specific matchers first, Wren's broad one last) and hands the
   // work to the first that takes it, recording the exchange on their thread.
   cleo: async (m) => {
-    const ROUTE_ORDER = ['hugo', 'vera', 'lena', 'remy', 'marlowe', 'iris', 'dewey', 'otto', 'wren'];
+    const ROUTE_ORDER = ['hugo', 'vera', 'lena', 'remy', 'marlowe', 'iris', 'piper', 'dewey', 'otto', 'wren'];
     for (const s of ROUTE_ORDER) {
       const r = await TOOLS[s](m);
       if (r === null) continue;
@@ -218,10 +239,17 @@ async function runTool(slug: string, message: string, thread = 'default'): Promi
   }
 
   // 2) A bare yes/no answers the last volunteered handoff in this thread.
+  //    For support sends, "reply: <text>" sends the human's EXACT words instead
+  //    of the draft (the template's typed-reply gate — verbatim, never reworded).
   const affirm = AFFIRM_RE.test(m);
-  if (affirm || DECLINE_RE.test(m)) {
+  const typedReply = m.match(/^reply:\s*([\s\S]+)$/i)?.[1]?.trim();
+  if (affirm || DECLINE_RE.test(m) || typedReply) {
     const pending = await latestPendingHandoff(slug, thread);
-    if (pending) {
+    if (pending && typedReply && pending.nextStep.kind === 'support_send') {
+      await markHandoff(pending.id, 'accepted');
+      return { text: await executeNextStep({ ...pending.nextStep, body: typedReply, verbatim: true }) };
+    }
+    if (pending && !typedReply) {
       await markHandoff(pending.id, affirm ? 'accepted' : 'declined');
       if (!affirm) return { text: 'Parked. Say the word when you want it.' };
       return { text: await executeNextStep(pending.nextStep) };
@@ -283,6 +311,36 @@ async function executeNextStep(step: NextStep): Promise<string> {
       await save('wren', 'default', 'assistant', text);
       return text;
     }
+    case 'support_send': {
+      const { sendGate, sendEmail, learnApprovedReply, SUPPORT_SANDBOX, TEST_INBOX } = await import('../support');
+      const { attachProof } = await import('../atelier');
+      const { soulVersion } = await import('../souls');
+      const requestedTo = String(step.to ?? '');
+      const subject = String(step.subject ?? '(no subject)');
+      const body = String(step.body ?? '');
+      const taskId = (step.taskId as string | null) ?? null;
+      // Sandbox rewrites the recipient to the test inbox (the template's move);
+      // the gate then hard-checks whatever we're actually about to send to.
+      const finalTo = SUPPORT_SANDBOX ? (TEST_INBOX || requestedTo) : requestedTo;
+      const gate = sendGate([finalTo]);
+      if (taskId) {
+        try {
+          await attachProof({
+            taskId, employeeSlug: 'piper', kind: 'send_gate',
+            status: gate.action === 'allow' ? 'pass' : 'fail', score: gate.action === 'allow' ? 1 : 0, threshold: 1,
+            detail: { evidence: 'measured', ...gate, sandbox: SUPPORT_SANDBOX, requestedTo, finalTo, verbatim: Boolean(step.verbatim), soulVersion: soulVersion('piper') ?? 'inline' },
+          });
+        } catch { /* the ledger never blocks the verdict */ }
+      }
+      if (gate.action === 'block') {
+        return `🚫 BLOCKED by the send gate (leak recorded): ${gate.reason}. Nothing left the studio — that's the gate doing its job, not a bug.`;
+      }
+      const sent = await sendEmail(finalTo, subject, body);
+      await learnApprovedReply(String(step.question ?? subject), body); // the playbook compounds
+      const rewrote = SUPPORT_SANDBOX && requestedTo && finalTo !== requestedTo ? ` (sandbox rewrote ${requestedTo} → ${finalTo})` : '';
+      const how = sent.sent ? `Sent via ${sent.transport}` : `RECORDED, not transmitted — ${sent.note}`;
+      return `${step.verbatim ? 'Your words, verbatim' : 'Draft approved'} → ${finalTo}${rewrote}.\n${how}.\nSubject: ${subject}\n\n${body}\n\n✓ send_gate proof logged · reply saved to the playbook.`;
+    }
     default:
       return `That handoff isn't wired to a real lane yet — nothing was fired.`;
   }
@@ -306,6 +364,7 @@ const CHAT_DIALS: Record<string, { temperature: number }> = {
   marlowe: { temperature: 0.4 },
   dewey: { temperature: 0.2 },
   otto: { temperature: 0.3 },
+  piper: { temperature: 0.4 },
 };
 const CHAT_NUM_CTX = Number(process.env.ATELIER_CHAT_NUM_CTX ?? 8192);
 
@@ -321,6 +380,7 @@ const PERSONAS: Record<string, string> = {
   marlowe: `You are Marlowe, Evergreen's editor and brand critic. You red-team work for voice, clarity, and on-brand-ness. Honest, exacting, kind. You name the 2-3 specific fixes, never vague praise.`,
   dewey: `You are Dewey, Evergreen's archivist. You keep the team's memory — what was decided, what worked, where things live. You answer "have we done this?" and "what did we decide about X?" precisely.`,
   otto: `You are Otto, Evergreen's ops/SRE. You keep the substrate healthy. Calm, terse, reassuring. You talk about service health, GPU lanes, and what's green vs at risk.`,
+  piper: `You are Piper, Evergreen's support desk. Warm, specific, honest. You draft replies grounded in the playbook, never invent policy, and nothing sends without Tyler's explicit yes.`,
 };
 
 // Which learned-taste stream (if any) each agent recalls in chat. Wren writes
