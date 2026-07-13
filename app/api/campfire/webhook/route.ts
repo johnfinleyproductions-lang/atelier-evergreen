@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { agentChat } from '@/lib/agents/chat';
-import { campfirePost } from '@/lib/campfire';
+import { campfirePost, agentForRoom } from '@/lib/campfire';
 import { safeEqual } from '@/lib/gate-auth';
 
 export const runtime = 'nodejs';
@@ -29,9 +29,14 @@ interface CampfirePayload {
   message?: { body?: { plain?: string } };
 }
 
-function resolveAgent(text: string): { slug: string; msg: string } {
+// Addressing, in priority order: an explicit "wren: ..." prefix wins anywhere;
+// otherwise an agent's own room addresses that agent (no prefix to remember —
+// the room IS the agent); otherwise Cleo routes.
+function resolveAgent(text: string, roomId: string): { slug: string; msg: string } {
   const m = text.trim().toLowerCase().match(/^@?([a-z]+)\s*[,:]\s*/);
   if (m && AGENTS.includes(m[1])) return { slug: m[1], msg: text.trim().slice(m[0].length).trim() };
+  const roomAgent = agentForRoom(roomId);
+  if (roomAgent) return { slug: roomAgent, msg: text.trim() };
   return { slug: 'cleo', msg: text.trim() };
 }
 
@@ -47,7 +52,7 @@ export async function POST(req: NextRequest) {
   const roomId = String(payload.room?.id ?? '');
   if (!text.trim()) return new NextResponse(null, { status: 204 });
 
-  const { slug, msg } = resolveAgent(text);
+  const { slug, msg } = resolveAgent(text, roomId);
   if (!msg) return new NextResponse(`Who do you need? ("wren: 6 headlines for course 19")`, { status: 200 });
 
   // The Campfire thread is its own conversation lane — one thread per room, so
