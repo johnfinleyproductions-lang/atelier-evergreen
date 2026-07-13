@@ -22,6 +22,11 @@ import { unreadSummary } from '../inbox';
 async function postToThread(slug: string, content: string): Promise<void> {
   await sql`insert into atelier_message (workspace_id, agent_slug, thread, role, content)
             values (${ATELIER_WS}, ${slug}, 'default', 'assistant', ${content})`;
+  // Mirror to Campfire so the brief and at-risk flags reach the phone (push).
+  try {
+    const { campfireMirror } = await import('../campfire');
+    await campfireMirror(slug, content);
+  } catch { /* best-effort */ }
 }
 
 // ── Otto: the substrate watcher ─────────────────────────────────────────────

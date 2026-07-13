@@ -11,7 +11,9 @@ import { GATE_SECRET, AUTH_DISABLED, isAuthorized } from '@/lib/gate-auth';
 // runtime nodejs: self-hosted `next start` box; also keeps node:crypto usable
 // and avoids the edge compile of instrumentation's job graph.
 
-const PUBLIC_PATHS = new Set(['/gate', '/api/gate', '/api/health']);
+// /api/campfire/webhook carries its own auth (constant-time token in the query
+// — Campfire's webhook delivery can't send custom headers).
+const PUBLIC_PATHS = new Set(['/gate', '/api/gate', '/api/health', '/api/campfire/webhook']);
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

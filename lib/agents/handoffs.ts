@@ -29,6 +29,11 @@ export interface CompletionMessage { text: string; nextStep?: NextStep }
 async function postToThread(slug: string, content: string, meta?: Record<string, unknown>, thread = 'default'): Promise<void> {
   await sql`insert into atelier_message (workspace_id, agent_slug, thread, role, content, meta)
             values (${ATELIER_WS}, ${slug}, ${thread}, 'assistant', ${content}, ${sql.json((meta ?? {}) as never)})`;
+  // Mirror to the agent's Campfire room (best-effort no-op until configured).
+  try {
+    const { campfireMirror } = await import('../campfire');
+    await campfireMirror(slug, content);
+  } catch { /* the thread is the source of truth; the mirror never fails a job */ }
 }
 
 // Minimal views of the runner result shapes (owned by lib/agents/*).
