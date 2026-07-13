@@ -55,9 +55,12 @@ export async function POST(req: NextRequest) {
   const { slug, msg } = resolveAgent(text, roomId);
   if (!msg) return new NextResponse(`Who do you need? ("wren: 6 headlines for course 19")`, { status: 200 });
 
-  // The Campfire thread is its own conversation lane — one thread per room, so
-  // handoff yes/no state in a room doesn't collide with the in-app thread.
-  const chat = agentChat(slug, msg, `campfire-${roomId || 'dm'}`);
+  // An agent's own room IS that agent's conversation: it shares the default
+  // thread with the in-app chat, so pending handoffs ("yes" to Piper's draft,
+  // Hugo's build offers) work from the phone — the room and the app are one
+  // dialogue. Unmapped rooms (All Talk, ad-hoc) stay in their own lane.
+  const roomIsAgents = agentForRoom(roomId) === slug;
+  const chat = agentChat(slug, msg, roomIsAgents ? 'default' : `campfire-${roomId || 'dm'}`);
 
   const timer = new Promise<'timeout'>((res) => setTimeout(() => res('timeout'), 5500));
   const first = await Promise.race([chat, timer]);
