@@ -6,7 +6,7 @@ import pkg from '@slack/bolt';
 const { App } = pkg;
 
 const ATELIER = process.env.ATELIER_URL ?? 'http://127.0.0.1:3040';
-const AGENTS = ['cleo', 'wren', 'hugo', 'iris', 'vera', 'lena', 'remy', 'marlowe', 'dewey', 'otto'];
+const AGENTS = ['cleo', 'wren', 'hugo', 'iris', 'vera', 'lena', 'remy', 'marlowe', 'dewey', 'otto', 'piper'];
 
 function resolve(text) {
   const m = (text || '').trim().toLowerCase().match(/^@?([a-z]+)\s*[,:]\s*/);
