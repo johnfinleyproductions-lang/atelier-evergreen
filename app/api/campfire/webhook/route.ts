@@ -29,14 +29,21 @@ interface CampfirePayload {
   message?: { body?: { plain?: string } };
 }
 
-// Addressing, in priority order: an explicit "wren: ..." prefix wins anywhere;
-// otherwise an agent's own room addresses that agent (no prefix to remember —
-// the room IS the agent); otherwise Cleo routes.
-function resolveAgent(text: string, roomId: string): { slug: string; msg: string } {
+// Addressing, in priority order:
+//   1. an explicit "wren: ..." prefix wins anywhere
+//   2. the agent's canonical room (ROOM_MAP) — shares their default thread
+//   3. a room NAMED after an agent ("Wren — course 20 copy") — that agent, in
+//      the room's own isolated lane. This is "start a new chat": make a room,
+//      put the agent's name first, and it's a fresh conversation with its own
+//      history (atelier_message, thread campfire-<roomId>).
+//   4. otherwise Cleo routes.
+function resolveAgent(text: string, roomId: string, roomName: string): { slug: string; msg: string } {
   const m = text.trim().toLowerCase().match(/^@?([a-z]+)\s*[,:]\s*/);
   if (m && AGENTS.includes(m[1])) return { slug: m[1], msg: text.trim().slice(m[0].length).trim() };
   const roomAgent = agentForRoom(roomId);
   if (roomAgent) return { slug: roomAgent, msg: text.trim() };
+  const byName = roomName.trim().toLowerCase().match(/^([a-z]+)(?:\b|[^a-z])/);
+  if (byName && AGENTS.includes(byName[1])) return { slug: byName[1], msg: text.trim() };
   return { slug: 'cleo', msg: text.trim() };
 }
 
@@ -50,9 +57,10 @@ export async function POST(req: NextRequest) {
   try { payload = (await req.json()) as CampfirePayload; } catch { return new NextResponse('bad payload', { status: 400 }); }
   const text = payload.message?.body?.plain ?? '';
   const roomId = String(payload.room?.id ?? '');
+  const roomName = String(payload.room?.name ?? '');
   if (!text.trim()) return new NextResponse(null, { status: 204 });
 
-  const { slug, msg } = resolveAgent(text, roomId);
+  const { slug, msg } = resolveAgent(text, roomId, roomName);
   if (!msg) return new NextResponse(`Who do you need? ("wren: 6 headlines for course 19")`, { status: 200 });
 
   // An agent's own room IS that agent's conversation: it shares the default
