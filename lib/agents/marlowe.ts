@@ -39,7 +39,8 @@ export interface Critique {
 // A formatting failure is "no read", never a fabricated verdict — a 9b JSON slip
 // must not be recorded as an editorial rejection (or a synthesized score) on the
 // scoreboard. Scores are only what the model actually said.
-function parseCritique(raw: string): Omit<Critique, 'model' | 'latencyMs'> {
+// Exported for the proof harness (scripts/proof-marlowe-unparsed.mjs).
+export function parseCritique(raw: string): Omit<Critique, 'model' | 'latencyMs'> {
   let s = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
   const a = s.indexOf('{'); const b = s.lastIndexOf('}');
   if (a >= 0 && b > a) s = s.slice(a, b + 1);
@@ -67,7 +68,7 @@ function parseCritique(raw: string): Omit<Critique, 'model' | 'latencyMs'> {
 /** Red-team a piece of copy. Grounded in Evergreen voice + Tyler's taste. Never throws. */
 export async function critique(content: string, label = 'this copy'): Promise<Critique> {
   const t0 = Date.now();
-  const base: Critique = { verdict: 'revise', onBrand: false, score: 0, issues: [], note: '', model: MARLOWE_MODEL, latencyMs: 0 };
+  const base: Critique = { verdict: 'revise', onBrand: false, score: null, issues: [], note: '', model: MARLOWE_MODEL, latencyMs: 0 };
   try {
     const taste = await recallTasteForPrompt('wren_option');
     const persona = soulTaskPersona('marlowe') ?? 'You are Marlowe, an exacting brand editor.';
@@ -130,7 +131,7 @@ export async function reviewLatestWren(decisionTaskId?: string): Promise<ReviewR
     // can be compared across Wren soul edits (soulVersion = Marlowe's own).
     const reviewedSoulVersion = (spec.soulVersion as string) ?? null;
     const payload = unreadable
-      ? { agent: 'marlowe', error: c.error, soulVersion: soulVersion('marlowe') ?? 'inline', reviewedSoulVersion }
+      ? { agent: 'marlowe', class: 'unparsed', error: c.error, soulVersion: soulVersion('marlowe') ?? 'inline', reviewedSoulVersion }
       : { agent: 'marlowe', verdict: c.verdict, score: c.score, issues: c.issues, soulVersion: soulVersion('marlowe') ?? 'inline', reviewedSoulVersion };
     await sql`
       insert into atelier_dossier_entry (workspace_id, dossier_id, task_id, employee_slug, entry_type, body, payload)
