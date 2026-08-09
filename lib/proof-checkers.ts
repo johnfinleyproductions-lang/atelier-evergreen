@@ -9,6 +9,7 @@
 //   remy  → render_qc     (REAL)  delegates to lib/visual-qa (Playwright render)
 //   lena  → match_score   (stub)  honest predicted-engagement heuristic
 //   vera  → passing_test  (stub)  honest coverage gate (uses real data if present)
+//   wren  → option_set    (REAL)  her deterministic option-set gate over spec.options
 //
 // Two of the conceptual kinds — predicted_engagement (lena) and coverage
 // (vera) — are not members of the frozen ProofKind enum, so the storable
@@ -32,6 +33,7 @@ import {
   type Task,
 } from './atelier';
 import type { ProofKind, ProofStatus } from './contracts';
+import { optionSetProof } from './agents/wren';
 import { resolveSpec, type ResolvedSpec } from './merge-ledger';
 import { getDefaultBrandRubric, getStyleCard } from './style-repo';
 
@@ -63,7 +65,7 @@ export interface RoleProofResult extends CheckerResult {
 }
 
 /** The canonical role keys the registry is indexed by. */
-export type RoleKey = 'iris' | 'hugo' | 'remy' | 'lena' | 'vera';
+export type RoleKey = 'iris' | 'hugo' | 'remy' | 'lena' | 'vera' | 'wren';
 
 // ---------------------------------------------------------------------------
 // Small, dependency-free helpers (deterministic — no I/O).
@@ -659,6 +661,43 @@ async function veraCoverage(task: Task): Promise<CheckerResult> {
   };
 }
 
+/**
+ * wren → option_set (REAL, deterministic).
+ *
+ * Re-runs Wren's own option-set gate (count/distinct/banned-words/9-word cap)
+ * over the option labels stored on the task's spec. With no option set on the
+ * task there is nothing to judge — honest 'warn', never a pass.
+ */
+async function wrenOptionSet(task: Task): Promise<CheckerResult> {
+  const spec = asObject(task.spec);
+  const raw = Array.isArray(spec.options) ? spec.options : [];
+  const labels = raw
+    .map((o) => (typeof o === 'string' ? o : String(asObject(o).label ?? '')))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const threshold = asNumber(spec.optionThreshold) ?? 0.5;
+
+  if (labels.length === 0) {
+    return {
+      status: 'warn',
+      score: null,
+      threshold,
+      detail: {
+        proof_label: 'option_set',
+        message: 'No option set on the task to gate.',
+      },
+    };
+  }
+
+  const gate = optionSetProof(labels);
+  return {
+    status: gate.status,
+    score: gate.score,
+    threshold,
+    detail: { proof_label: 'option_set', ...gate.detail },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The registry.
 // ---------------------------------------------------------------------------
@@ -673,6 +712,7 @@ export const PROOF_CHECKERS: Record<RoleKey, RoleProofChecker> = {
   // coverage is not a legal ProofKind — stored as passing_test; true label in
   // detail.proof_label.
   vera: { kind: 'passing_test', run: veraCoverage },
+  wren: { kind: 'option_set', run: wrenOptionSet },
 };
 
 // ---------------------------------------------------------------------------
