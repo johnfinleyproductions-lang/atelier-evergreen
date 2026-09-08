@@ -207,6 +207,11 @@ async function getTaskRow(taskId: string): Promise<Task | null> {
   return rows[0] ? mapTask(rows[0]) : null;
 }
 
+/** A single task by id (workspace-scoped). */
+export async function getTask(taskId: string): Promise<Task | null> {
+  return getTaskRow(taskId);
+}
+
 async function getProofRow(proofId: string): Promise<Proof | null> {
   const rows = (await sql`
     select * from atelier_proof

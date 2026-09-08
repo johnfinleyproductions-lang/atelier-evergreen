@@ -156,6 +156,56 @@ const RUNNERS: Record<string, (input: Record<string, unknown>) => Promise<unknow
   },
 };
 
+/**
+ * Fire the per-role proof-checker registry for a finished job (the wired path
+ * for lib/proof-checkers.ts). If the job produced or targeted a task, resolve
+ * that task's assignee and run their registered checker via
+ * runAndAttachRoleProof — so every task a job touches carries its role's own
+ * scored verdict, on top of any bespoke proof the runner attached. Best-effort:
+ * proof bookkeeping never fails a job. Every outcome is logged under
+ * [proof-registry] so the gate's firing is assertable from service logs.
+ */
+async function runRoleProofForJob(job: Job, result: unknown): Promise<void> {
+  const r = (result && typeof result === 'object' ? result : {}) as Record<string, unknown>;
+  const candidates = [r.taskId, r.decisionTaskId, job.input.taskId];
+  const taskId = candidates.find((c): c is string => typeof c === 'string' && c.length > 0) ?? null;
+  if (!taskId) return;
+
+  const { getTask, getEmployee } = await import('./atelier');
+  const task = await getTask(taskId);
+  if (!task) {
+    console.log(`[proof-registry] job=${job.id} kind=${job.kind} task=${taskId} not found — skipped`);
+    return;
+  }
+  const slug = task.assigneeSlug ?? job.agentSlug;
+  if (!slug) {
+    console.log(`[proof-registry] job=${job.id} kind=${job.kind} task=${taskId} has no assignee — skipped`);
+    return;
+  }
+  const employee = await getEmployee(slug);
+  if (!employee) {
+    console.log(`[proof-registry] job=${job.id} kind=${job.kind} employee '${slug}' not found — skipped`);
+    return;
+  }
+
+  try {
+    const { runAndAttachRoleProof } = await import('./proof-checkers');
+    const proof = await runAndAttachRoleProof(task, employee);
+    console.log(
+      `[proof-registry] job=${job.id} kind=${job.kind} task=${task.id} employee=${slug} ` +
+      `checker fired → ${proof.kind}:${proof.status}${proof.score !== null ? ` score=${proof.score}` : ''}`,
+    );
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === 'NO_CHECKER') {
+      console.log(`[proof-registry] job=${job.id} kind=${job.kind} no checker registered for '${slug}' — skipped`);
+      return;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[proof-registry] job=${job.id} kind=${job.kind} checker for '${slug}' errored: ${message}`);
+  }
+}
+
 // Which model each job kind loads — so we can free the lane for it first.
 const JOB_MODEL: Record<string, string> = {
   hugo_build: process.env.ATELIER_HUGO_MODEL ?? 'qwen2.5-coder:14b',
@@ -191,6 +241,11 @@ export async function processJob(id: string): Promise<void> {
       }
       const result = await runner(job.input);
       await finishOk(id, result);
+      // The per-role proof registry: any task this job produced/targeted gets
+      // its assignee's registered checker run and recorded.
+      try {
+        await runRoleProofForJob(job, result);
+      } catch { /* proof bookkeeping never fails a job */ }
       // Proactive report-back: the owning agent posts the result + a volunteered
       // next step to their chat thread (souls house style). Best-effort.
       if (job.agentSlug) {
