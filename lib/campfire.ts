@@ -13,10 +13,28 @@
 const CAMPFIRE_URL = (process.env.CAMPFIRE_URL ?? '').replace(/\/$/, '');
 const BOT_KEY = process.env.CAMPFIRE_BOT_KEY ?? '';
 
-// Room map: which room each agent's report-backs land in.
+// Room map: which room each agent's report-backs land in — and, inverted,
+// which agent a room "belongs to" (their room auto-addresses them, no prefix).
+// CAMPFIRE_ROOM_MAP is a JSON object {"wren":"5",...}; the three legacy vars
+// cover cleo/piper/otto's original rooms and act as fallbacks.
 const ROOM_FLOOR = process.env.CAMPFIRE_ROOM_FLOOR ?? '';
 const ROOM_SUPPORT = process.env.CAMPFIRE_ROOM_SUPPORT_DESK ?? '';
 const ROOM_SUBSTRATE = process.env.CAMPFIRE_ROOM_SUBSTRATE ?? '';
+
+function parseRoomMap(): Record<string, string> {
+  try {
+    const j = JSON.parse(process.env.CAMPFIRE_ROOM_MAP ?? '{}') as Record<string, unknown>;
+    return Object.fromEntries(Object.entries(j).map(([k, v]) => [k, String(v)]));
+  } catch {
+    return {};
+  }
+}
+const ROOM_MAP: Record<string, string> = {
+  ...(ROOM_FLOOR ? { cleo: ROOM_FLOOR } : {}),
+  ...(ROOM_SUPPORT ? { piper: ROOM_SUPPORT } : {}),
+  ...(ROOM_SUBSTRATE ? { otto: ROOM_SUBSTRATE } : {}),
+  ...parseRoomMap(),
+};
 
 export function campfireConfigured(): boolean {
   return Boolean(CAMPFIRE_URL && BOT_KEY);
@@ -24,9 +42,16 @@ export function campfireConfigured(): boolean {
 
 /** The room an agent's messages belong in (falls back to #floor). */
 export function roomFor(slug: string): string {
-  if (slug === 'piper') return ROOM_SUPPORT || ROOM_FLOOR;
-  if (slug === 'otto') return ROOM_SUBSTRATE || ROOM_FLOOR;
-  return ROOM_FLOOR;
+  return ROOM_MAP[slug] || ROOM_FLOOR;
+}
+
+/** The agent a room belongs to, if it's an agent room (cleo's = the floor, so
+ *  it stays general routing rather than forcing every floor message to her). */
+export function agentForRoom(roomId: string): string | null {
+  for (const [slug, id] of Object.entries(ROOM_MAP)) {
+    if (id === roomId && slug !== 'cleo') return slug;
+  }
+  return null;
 }
 
 /** Post as the bot into a room. Best-effort: failures are swallowed (the

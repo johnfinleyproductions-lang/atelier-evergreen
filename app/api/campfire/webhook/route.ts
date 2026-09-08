@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { agentChat } from '@/lib/agents/chat';
-import { campfirePost } from '@/lib/campfire';
+import { campfirePost, agentForRoom } from '@/lib/campfire';
 import { safeEqual } from '@/lib/gate-auth';
 
 export const runtime = 'nodejs';
@@ -29,9 +29,21 @@ interface CampfirePayload {
   message?: { body?: { plain?: string } };
 }
 
-function resolveAgent(text: string): { slug: string; msg: string } {
+// Addressing, in priority order:
+//   1. an explicit "wren: ..." prefix wins anywhere
+//   2. the agent's canonical room (ROOM_MAP) — shares their default thread
+//   3. a room NAMED after an agent ("Wren — course 20 copy") — that agent, in
+//      the room's own isolated lane. This is "start a new chat": make a room,
+//      put the agent's name first, and it's a fresh conversation with its own
+//      history (atelier_message, thread campfire-<roomId>).
+//   4. otherwise Cleo routes.
+function resolveAgent(text: string, roomId: string, roomName: string): { slug: string; msg: string } {
   const m = text.trim().toLowerCase().match(/^@?([a-z]+)\s*[,:]\s*/);
   if (m && AGENTS.includes(m[1])) return { slug: m[1], msg: text.trim().slice(m[0].length).trim() };
+  const roomAgent = agentForRoom(roomId);
+  if (roomAgent) return { slug: roomAgent, msg: text.trim() };
+  const byName = roomName.trim().toLowerCase().match(/^([a-z]+)(?:\b|[^a-z])/);
+  if (byName && AGENTS.includes(byName[1])) return { slug: byName[1], msg: text.trim() };
   return { slug: 'cleo', msg: text.trim() };
 }
 
@@ -45,14 +57,18 @@ export async function POST(req: NextRequest) {
   try { payload = (await req.json()) as CampfirePayload; } catch { return new NextResponse('bad payload', { status: 400 }); }
   const text = payload.message?.body?.plain ?? '';
   const roomId = String(payload.room?.id ?? '');
+  const roomName = String(payload.room?.name ?? '');
   if (!text.trim()) return new NextResponse(null, { status: 204 });
 
-  const { slug, msg } = resolveAgent(text);
+  const { slug, msg } = resolveAgent(text, roomId, roomName);
   if (!msg) return new NextResponse(`Who do you need? ("wren: 6 headlines for course 19")`, { status: 200 });
 
-  // The Campfire thread is its own conversation lane — one thread per room, so
-  // handoff yes/no state in a room doesn't collide with the in-app thread.
-  const chat = agentChat(slug, msg, `campfire-${roomId || 'dm'}`);
+  // An agent's own room IS that agent's conversation: it shares the default
+  // thread with the in-app chat, so pending handoffs ("yes" to Piper's draft,
+  // Hugo's build offers) work from the phone — the room and the app are one
+  // dialogue. Unmapped rooms (All Talk, ad-hoc) stay in their own lane.
+  const roomIsAgents = agentForRoom(roomId) === slug;
+  const chat = agentChat(slug, msg, roomIsAgents ? 'default' : `campfire-${roomId || 'dm'}`);
 
   const timer = new Promise<'timeout'>((res) => setTimeout(() => res('timeout'), 5500));
   const first = await Promise.race([chat, timer]);
