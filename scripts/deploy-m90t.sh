@@ -9,6 +9,18 @@
 # `next start` execs, even when every route 500s.
 set -euo pipefail
 
+# Preflight: the rsync below ships (and with --delete, can remove) .env.local —
+# the Mac copy is the source of truth for env. Deploying without a usable local
+# copy would wipe the server's secret and 503 the whole app (fail-closed gate).
+if [[ ! -f .env.local ]]; then
+  echo "ABORT: no .env.local in $(pwd) — deploying would delete the server's env (rsync --delete)." >&2
+  exit 1
+fi
+if ! grep -qE '^ATELIER_API_SECRET=.+' .env.local && ! grep -qE '^ATELIER_AUTH_DISABLED=1' .env.local; then
+  echo "ABORT: .env.local has no ATELIER_API_SECRET (and no explicit ATELIER_AUTH_DISABLED=1) — deploying would ship a secretless env and 503 every route." >&2
+  exit 1
+fi
+
 echo "→ syncing to M90t…"
 # --delete keeps the server tree in lockstep (removed routes actually go away);
 # excluded dirs (node_modules/.next/QA screenshots) are left untouched, and
